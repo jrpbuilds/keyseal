@@ -249,35 +249,42 @@ func TestEncryptFileWithStubBinary(t *testing.T) {
 	}
 }
 
-func TestEncryptFileCleansUpTempPlaintext(t *testing.T) {
+// TestEncryptFilePassesPlaintextOnStdinOnly verifies plaintext reaches SOPS
+// through stdin, never through arguments or a temp file path.
+func TestEncryptFilePassesPlaintextOnStdinOnly(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
 	}
 
-	trackerPath := filepath.Join(dir, "temp-path.txt")
+	argsPath := filepath.Join(dir, "args.txt")
+	stdinPath := filepath.Join(dir, "stdin.txt")
 	scriptPath := filepath.Join(binDir, "fake-sops")
-	script := "#!/bin/sh\nif [ \"$1\" = \"encrypt\" ] && [ \"$2\" = \"--filename-override\" ]; then\n  printf '%s' \"$3\" > \"" + trackerPath + "\"\n  printf 'ENC[test]\\n'\n  exit 0\nfi\nexit 1\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"" + argsPath + "\"\ncat > \"" + stdinPath + "\"\nprintf 'ENC[test]\\n'\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake sops: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if _, err := sopsutil.EncryptFile("fake-sops", "", []byte("version: 1\n"), "production/platform/app.enc.yaml"); err != nil {
+	plaintext := "version: 1\nvalues:\n  K: stdin-only-marker\n"
+	if _, err := sopsutil.EncryptFile("fake-sops", "", []byte(plaintext), "production/platform/app.enc.yaml"); err != nil {
 		t.Fatalf("EncryptFile returned error: %v", err)
 	}
 
-	tempPathBytes, err := os.ReadFile(trackerPath)
+	args, err := os.ReadFile(argsPath)
 	if err != nil {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
-	tempPath := string(tempPathBytes)
-	if tempPath == "" {
-		t.Fatal("expected fake sops to record temp path")
+	if got := strings.TrimSpace(string(args)); got != "encrypt --filename-override production/platform/app.enc.yaml" {
+		t.Fatalf("unexpected sops args: %q", got)
 	}
-	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
-		t.Fatalf("expected temp plaintext file to be removed, stat err = %v", err)
+	stdin, err := os.ReadFile(stdinPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if string(stdin) != plaintext {
+		t.Fatalf("expected plaintext on stdin, got %q", string(stdin))
 	}
 }
 
@@ -351,6 +358,7 @@ func TestUpdateKeysOmitsYesFlagByDefault(t *testing.T) {
 
 func writeLibraryDecryptFixture(t *testing.T, keyBody string) (string, string) {
 	t.Helper()
+	clearAgeKeyEnv(t)
 	dir := t.TempDir()
 	secretPath := filepath.Join(dir, "app.enc.yaml")
 	if err := os.WriteFile(secretPath, []byte(testEncryptedYAML), 0o600); err != nil {

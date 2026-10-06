@@ -37,7 +37,7 @@ func newCommitCommand() *cobra.Command {
 			}
 			commitMessage := message
 			if commitMessage == "" {
-				commitMessage = defaultCommitMessageForBatch(len(paths))
+				commitMessage = defaultCommitMessageForBatch(len(entries))
 			}
 			if err := commitPaths(ctx, paths, commitMessage); err != nil {
 				if errors.Is(err, gitutil.ErrNothingToCommit) {

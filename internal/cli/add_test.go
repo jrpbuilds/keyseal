@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,6 +115,15 @@ func TestAddHelpShowsEncryptedOnlyFlow(t *testing.T) {
 func runRootCommand(t *testing.T, cwd string, args ...string) (string, error) {
 	t.Helper()
 
+	stdout, _, err := runRootCommandIO(t, cwd, nil, args...)
+	return stdout, err
+}
+
+// runRootCommandIO runs the CLI with optional stdin and returns stdout and
+// stderr separately so tests can inspect both streams.
+func runRootCommandIO(t *testing.T, cwd string, stdin io.Reader, args ...string) (string, string, error) {
+	t.Helper()
+
 	origWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd returned error: %v", err)
@@ -132,9 +142,12 @@ func runRootCommand(t *testing.T, cwd string, args ...string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
+	if stdin != nil {
+		cmd.SetIn(stdin)
+	}
 	cmd.SetArgs(args)
 	err = cmd.Execute()
-	return stdout.String(), err
+	return stdout.String(), stderr.String(), err
 }
 
 func writeTestConfig(t *testing.T, root string) {

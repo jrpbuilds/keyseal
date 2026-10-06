@@ -11,6 +11,14 @@ Highlights:
 - `--dry-run` with `--profile` validates the full plan and prints it without writing; it decrypts to fully validate inputs but never exposes values
 - profile definitions are validated at config load: empty inputs, unknown formats, invalid modes, and duplicate output paths within a profile are all rejected
 - `keyseal doctor` and `keyseal verify` now report per-profile configuration and input-resolvability problems as discrete checks
+- new `keyseal clone` copies a secret document to a new name, encrypted for the recipients configured for the destination
+- new `keyseal set`, `unset`, `generate`, and `import` change secret values without opening an editor; values come only from stdin, a file descriptor, or an env file
+- every change is verified before it is saved, and the original file is left untouched if anything fails
+- changes are refused if your SOPS rules would leave any secret value unencrypted
+- `keyseal generate` creates strong random values as URL-safe base64, base64, or hex
+- `keyseal unset` fails clearly when a key is not present instead of reporting success
+- `--commit` now commits only the files the command changed, leaving your other staged work alone
+- `keyseal add` and `keyseal edit` no longer write a temporary plaintext file while encrypting
 
 ## v1.1.0
 

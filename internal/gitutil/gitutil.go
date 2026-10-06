@@ -132,25 +132,77 @@ func HasLocalChanges(binary, repoRoot, path string) (bool, error) {
 //
 // Callers are expected to decide which files are safe to stage. This helper
 // exists so CLI commands never fall back to broad `git add .` behavior.
+//
+// Paths missing from the working tree are staged as deletions only when HEAD
+// still contains them. A missing path absent from both HEAD and the index,
+// such as the old side of a `git mv`, is already staged and is skipped. A
+// missing path that exists only in the index is left alone: removing it would
+// discard a staged blob that has never been committed.
 func StagePaths(binary, repoRoot string, paths []string) error {
-	if len(paths) == 0 {
-		return nil
+	var present, deleted []string
+	for _, path := range paths {
+		pathspec, err := Pathspec(repoRoot, path)
+		if err != nil {
+			return err
+		}
+		_, err = os.Lstat(filepath.Join(repoRoot, filepath.FromSlash(pathspec)))
+		switch {
+		case err == nil:
+			present = append(present, pathspec)
+		case errors.Is(err, os.ErrNotExist):
+			inHead, err := RevisionContainsPath(binary, repoRoot, "HEAD", pathspec)
+			if err != nil {
+				return err
+			}
+			if inHead {
+				deleted = append(deleted, pathspec)
+				continue
+			}
+			staged, err := indexContainsPath(binary, repoRoot, pathspec)
+			if err != nil {
+				return err
+			}
+			if staged {
+				return fmt.Errorf("stage git paths: %s is staged but missing from the worktree", pathspec)
+			}
+		default:
+			return fmt.Errorf("stage git paths: %w", err)
+		}
 	}
-	pathspecs, err := Pathspecs(repoRoot, paths)
-	if err != nil {
-		return err
+	if len(present) > 0 {
+		args := append([]string{"add", "--"}, present...)
+		if _, _, err := runCaptured(repoRoot, binary, args...); err != nil {
+			return fmt.Errorf("stage git paths: %w", err)
+		}
 	}
-	args := []string{"add", "--"}
-	args = append(args, pathspecs...)
-	if _, _, err := runCaptured(repoRoot, binary, args...); err != nil {
-		return fmt.Errorf("stage git paths: %w", err)
+	if len(deleted) > 0 {
+		args := append([]string{"rm", "--cached", "--ignore-unmatch", "--quiet", "--"}, deleted...)
+		if _, _, err := runCaptured(repoRoot, binary, args...); err != nil {
+			return fmt.Errorf("stage removed git paths: %w", err)
+		}
 	}
 	return nil
 }
 
-// HasStagedChanges reports whether the index currently contains changes.
-func HasStagedChanges(binary, repoRoot string) (bool, error) {
-	cmd := exec.Command(binary, "diff", "--cached", "--quiet", "--exit-code")
+// indexContainsPath reports whether the index has a blob for pathspec.
+func indexContainsPath(binary, repoRoot, pathspec string) (bool, error) {
+	cmd := exec.Command(binary, "cat-file", "-e", ":"+filepath.ToSlash(pathspec))
+	cmd.Dir = repoRoot
+	err := cmd.Run()
+	switch {
+	case err == nil:
+		return true, nil
+	case exitCode(err) == 128:
+		return false, nil
+	default:
+		return false, fmt.Errorf("check git index path: %w", err)
+	}
+}
+
+// hasStagedChanges reports whether the index contains changes for pathspecs.
+func hasStagedChanges(binary, repoRoot string, pathspecs []string) (bool, error) {
+	args := appendPathspecs([]string{"diff", "--cached", "--quiet", "--exit-code"}, pathspecs)
+	cmd := exec.Command(binary, args...)
 	cmd.Dir = repoRoot
 	err := cmd.Run()
 	switch {
@@ -163,19 +215,33 @@ func HasStagedChanges(binary, repoRoot string) (bool, error) {
 	}
 }
 
-// Commit creates a Git commit for the currently staged changes.
-func Commit(binary, repoRoot, message string) error {
+// CommitPaths stages the exact paths provided and commits only those paths.
+//
+// Unlike a plain `git commit`, unrelated changes the operator already staged
+// stay staged and are not swept into the Keyseal commit.
+func CommitPaths(binary, repoRoot, message string, paths []string) error {
 	if strings.TrimSpace(message) == "" {
 		return errors.New("commit message is required")
 	}
-	hasChanges, err := HasStagedChanges(binary, repoRoot)
+	if len(paths) == 0 {
+		return ErrNothingToCommit
+	}
+	if err := StagePaths(binary, repoRoot, paths); err != nil {
+		return err
+	}
+	pathspecs, err := Pathspecs(repoRoot, paths)
+	if err != nil {
+		return err
+	}
+	hasChanges, err := hasStagedChanges(binary, repoRoot, pathspecs)
 	if err != nil {
 		return err
 	}
 	if !hasChanges {
 		return ErrNothingToCommit
 	}
-	if _, _, err := runCaptured(repoRoot, binary, "commit", "-m", message); err != nil {
+	args := appendPathspecs([]string{"commit", "-m", message, "--only"}, pathspecs)
+	if _, _, err := runCaptured(repoRoot, binary, args...); err != nil {
 		return fmt.Errorf("create git commit: %w", err)
 	}
 	return nil

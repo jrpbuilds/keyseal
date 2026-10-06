@@ -20,6 +20,19 @@ jobs:
         with:
           go-version: "1.27.x"
 
+      # Real SOPS integration tests skip when sops is missing; install a pinned,
+      # checksum-verified release so they always run in CI.
+      - name: Install sops
+        env:
+          SOPS_VERSION: v3.13.3
+          SOPS_SHA256: e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b
+        run: |
+          curl -fsSLo sops "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
+          echo "${SOPS_SHA256}  sops" | sha256sum -c -
+          sudo install -m 0755 sops /usr/local/bin/sops
+          rm sops
+          sops --version
+
       - name: Check formatting
         run: make fmt-check
 

@@ -175,6 +175,32 @@ func TestCommitStagesOnlyKeysealManagedFiles(t *testing.T) {
 	}
 }
 
+func TestCommitIncludesBothSidesOfStagedRename(t *testing.T) {
+	repoRoot := seedKeysealRepo(t, false)
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/a.enc.yaml"), "secret\n")
+	gitRun(t, repoRoot, "add", "--", "production/a.enc.yaml")
+	gitRun(t, repoRoot, "commit", "-m", "add a")
+	gitRun(t, repoRoot, "mv", "production/a.enc.yaml", "production/b.enc.yaml")
+
+	output, err := runRootCommand(t, repoRoot, "commit")
+	if err != nil {
+		t.Fatalf("runRootCommand returned error: %v", err)
+	}
+	if !strings.Contains(output, "committed Git change: Update 1 Keyseal file") {
+		t.Fatalf("expected one file in the default message, got %q", output)
+	}
+	if got := strings.TrimSpace(gitOutput(t, repoRoot, "log", "-1", "--pretty=%s")); got != "Update 1 Keyseal file" {
+		t.Fatalf("expected rename to count as one file, got %q", got)
+	}
+	tree := gitOutput(t, repoRoot, "ls-tree", "-r", "--name-only", "HEAD")
+	if !strings.Contains(tree, "production/b.enc.yaml") || strings.Contains(tree, "production/a.enc.yaml") {
+		t.Fatalf("expected HEAD to contain only the renamed file, got %q", tree)
+	}
+	if status := strings.TrimSpace(gitOutput(t, repoRoot, "status", "--porcelain")); status != "" {
+		t.Fatalf("expected a clean working tree, got %q", status)
+	}
+}
+
 func TestAddMessageImpliesCommit(t *testing.T) {
 	repoRoot := seedKeysealRepo(t, false)
 	configureFakeEncryptSOPS(t, repoRoot)

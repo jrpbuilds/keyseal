@@ -30,6 +30,22 @@ func DecryptFileWithWarnings(path, format, ageKeyFile string) ([]byte, []string,
 	return decryptFile(path, format, ageKeyFile, true)
 }
 
+// DecryptData decrypts SOPS-encrypted bytes in memory using the official SOPS
+// Go library. Mutating commands use it to verify ciphertext before it is
+// written anywhere.
+func DecryptData(data []byte, format, ageKeyFile string) ([]byte, error) {
+	if strings.TrimSpace(format) == "" {
+		format = "yaml"
+	}
+	plaintext, _, err := withAgeKeyFileEnv(ageKeyFile, false, func() ([]byte, error) {
+		return decrypt.Data(data, format)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("decrypt data with SOPS library: %w", err)
+	}
+	return plaintext, nil
+}
+
 // decryptFile is the shared implementation behind quiet render/exec decrypts
 // and diagnostic doctor decrypts.
 func decryptFile(path, format, ageKeyFile string, captureWarnings bool) ([]byte, []string, error) {

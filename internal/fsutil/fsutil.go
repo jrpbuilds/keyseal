@@ -89,6 +89,10 @@ func AtomicWriteFile(path string, data []byte, mode os.FileMode, force bool) err
 		temp.Close()
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return fmt.Errorf("sync temp file: %w", err)
+	}
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
 	}

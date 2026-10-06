@@ -37,6 +37,11 @@ func newRootCommand() *cobra.Command {
 			"  keyseal history production/platform/app\n" +
 			"  keyseal commit -m \"Rotate Stripe webhook secret\"\n" +
 			"  keyseal edit production/platform/app\n" +
+			"  keyseal clone production/platform/app production/platform/app-next\n" +
+			"  keyseal set production/platform/app-next STRIPE_SECRET_KEY --stdin\n" +
+			"  keyseal unset production/platform/app-next TWILIO_TOKEN\n" +
+			"  keyseal generate production/platform/app-next APP_SIGNING_KEY --bytes 32\n" +
+			"  keyseal import production/platform/app-next --from-env-file ./intake.env --keys STRIPE_SECRET_KEY\n" +
 			"  keyseal updatekeys --all --yes\n" +
 			"  keyseal rollback production/platform/app --to abc1234 --dry-run\n" +
 			"  keyseal render production/platform/app --stdout\n" +
@@ -61,6 +66,11 @@ func newRootCommand() *cobra.Command {
 		newInitCommand(),
 		newAddCommand(),
 		newEditCommand(),
+		newCloneCommand(),
+		newSetCommand(),
+		newUnsetCommand(),
+		newGenerateCommand(),
+		newImportCommand(),
 		newStatusCommand(),
 		newDiffCommand(),
 		newHistoryCommand(),

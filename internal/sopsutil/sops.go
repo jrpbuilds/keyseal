@@ -61,39 +61,23 @@ func Version(binary, ageKeyFile string) (string, error) {
 	return result.Version, nil
 }
 
-// EncryptFile encrypts plaintext by writing it to a secure temp file and
-// invoking `sops encrypt --filename-override <target> <tempfile>`.
+// EncryptFile encrypts plaintext by piping it to
+// `sops encrypt --filename-override <target>` on stdin.
 //
-// The caller owns the final write path so encrypted mode can keep plaintext out
-// of the destination `.enc.yaml` file entirely.
+// Plaintext never touches disk and never appears in process arguments. The
+// filename override makes SOPS select the .sops.yaml creation rule for the
+// target path. The caller owns the final write so plaintext stays out of the
+// destination `.enc.yaml` file entirely.
 func EncryptFile(binary, ageKeyFile string, plaintext []byte, filenameOverride string) ([]byte, error) {
 	if _, err := LookPath(binary); err != nil {
 		return nil, err
 	}
 
-	temp, err := os.CreateTemp("", "keyseal-plaintext-*.yaml")
-	if err != nil {
-		return nil, fmt.Errorf("create temp file: %w", err)
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return nil, fmt.Errorf("chmod temp file: %w", err)
-	}
-	if _, err := temp.Write(plaintext); err != nil {
-		temp.Close()
-		return nil, fmt.Errorf("write temp file: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return nil, fmt.Errorf("close temp file: %w", err)
-	}
-
-	cmd := exec.Command(binary, "encrypt", "--filename-override", filenameOverride, tempPath)
+	cmd := exec.Command(binary, "encrypt", "--filename-override", filenameOverride)
 	cmd.Env = commandEnv(ageKeyFile)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	cmd.Stdin = bytes.NewReader(plaintext)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

@@ -196,10 +196,7 @@ func Run(opts Options) (Result, error) {
 		paths = append(paths, updated.Path)
 	}
 	slices.Sort(paths)
-	if err := gitutil.StagePaths(opts.GitBinary, gitRoot, paths); err != nil {
-		return result, err
-	}
-	if err := gitutil.Commit(opts.GitBinary, gitRoot, message); err != nil {
+	if err := gitutil.CommitPaths(opts.GitBinary, gitRoot, message, paths); err != nil {
 		return result, err
 	}
 	result.Committed = true

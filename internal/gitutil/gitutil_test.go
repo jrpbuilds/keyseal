@@ -100,18 +100,106 @@ func TestStagePathsStagesOnlyExplicitFiles(t *testing.T) {
 	}
 }
 
-func TestCommitReturnsNothingToCommit(t *testing.T) {
+func TestStagePathsStagesDeletionsAndSkipsAlreadyRemovedPaths(t *testing.T) {
 	repoRoot := newGitRepo(t)
+	writeFile(t, filepath.Join(repoRoot, "deleted.enc.yaml"), "deleted\n")
+	writeFile(t, filepath.Join(repoRoot, "moved.enc.yaml"), "moved\n")
+	gitRun(t, repoRoot, "add", "--", "deleted.enc.yaml", "moved.enc.yaml")
+	gitRun(t, repoRoot, "commit", "-m", "seed")
 
-	err := gitutil.Commit("git", repoRoot, "no-op")
-	if err == nil {
-		t.Fatal("expected Commit to fail without staged changes")
+	if err := os.Remove(filepath.Join(repoRoot, "deleted.enc.yaml")); err != nil {
+		t.Fatalf("Remove returned error: %v", err)
 	}
+	gitRun(t, repoRoot, "mv", "moved.enc.yaml", "renamed.enc.yaml")
+
+	paths := []string{
+		filepath.Join(repoRoot, "deleted.enc.yaml"),
+		filepath.Join(repoRoot, "moved.enc.yaml"),
+		filepath.Join(repoRoot, "renamed.enc.yaml"),
+	}
+	if err := gitutil.StagePaths("git", repoRoot, paths); err != nil {
+		t.Fatalf("StagePaths returned error: %v", err)
+	}
+
+	status := gitOutput(t, repoRoot, "status", "--porcelain")
+	if !strings.Contains(status, "D  deleted.enc.yaml") || !strings.Contains(status, "R  moved.enc.yaml -> renamed.enc.yaml") {
+		t.Fatalf("expected staged deletion and rename, got %q", status)
+	}
+}
+
+func TestStagePathsRefusesToDropStagedAddMissingFromWorktree(t *testing.T) {
+	repoRoot := newGitRepo(t)
+	writeFile(t, filepath.Join(repoRoot, "seed.txt"), "seed\n")
+	gitRun(t, repoRoot, "add", "--", "seed.txt")
+	gitRun(t, repoRoot, "commit", "-m", "seed")
+
+	target := filepath.Join(repoRoot, "new.enc.yaml")
+	writeFile(t, target, "only staged copy\n")
+	gitRun(t, repoRoot, "add", "--", "new.enc.yaml")
+	if err := os.Remove(target); err != nil {
+		t.Fatalf("Remove returned error: %v", err)
+	}
+	before := gitOutput(t, repoRoot, "rev-parse", ":new.enc.yaml")
+	statusBefore := gitOutput(t, repoRoot, "status", "--porcelain")
+
+	err := gitutil.StagePaths("git", repoRoot, []string{target})
+	if err == nil || !strings.Contains(err.Error(), "staged but missing from the worktree") {
+		t.Fatalf("expected a missing staged add to be refused, got %v", err)
+	}
+	if got := gitOutput(t, repoRoot, "rev-parse", ":new.enc.yaml"); got != before {
+		t.Fatalf("staged blob changed: got %q, want %q", got, before)
+	}
+	if got := gitOutput(t, repoRoot, "status", "--porcelain"); got != statusBefore {
+		t.Fatalf("index changed after refusal: got %q, want %q", got, statusBefore)
+	}
+
+	// A path in neither HEAD nor the index is not an error.
+	if err := gitutil.StagePaths("git", repoRoot, []string{filepath.Join(repoRoot, "absent.enc.yaml")}); err != nil {
+		t.Fatalf("StagePaths returned error for an unknown path: %v", err)
+	}
+}
+
+func TestCommitPathsReturnsNothingToCommit(t *testing.T) {
+	repoRoot := newGitRepo(t)
+	target := filepath.Join(repoRoot, "secret.enc.yaml")
+	writeFile(t, target, "v1\n")
+	gitRun(t, repoRoot, "add", "--", "secret.enc.yaml")
+	gitRun(t, repoRoot, "commit", "-m", "seed")
+
+	// Another staged change must not count as something to commit for target.
+	writeFile(t, filepath.Join(repoRoot, "notes.txt"), "staged\n")
+	gitRun(t, repoRoot, "add", "--", "notes.txt")
+
+	err := gitutil.CommitPaths("git", repoRoot, "no-op", []string{target})
 	if err != gitutil.ErrNothingToCommit {
 		t.Fatalf("expected ErrNothingToCommit, got %v", err)
 	}
 }
 
+func TestCommitPathsCommitsOnlyGivenPaths(t *testing.T) {
+	repoRoot := newGitRepo(t)
+	writeFile(t, filepath.Join(repoRoot, "seed.txt"), "seed\n")
+	gitRun(t, repoRoot, "add", "--", "seed.txt")
+	gitRun(t, repoRoot, "commit", "-m", "seed")
+
+	writeFile(t, filepath.Join(repoRoot, "notes.txt"), "staged by operator\n")
+	gitRun(t, repoRoot, "add", "--", "notes.txt")
+	target := filepath.Join(repoRoot, "production", "app.enc.yaml")
+	writeFile(t, target, "new secret\n")
+
+	if err := gitutil.CommitPaths("git", repoRoot, "Add secret", []string{target}); err != nil {
+		t.Fatalf("CommitPaths returned error: %v", err)
+	}
+
+	committed := strings.Fields(gitOutput(t, repoRoot, "show", "--name-only", "--pretty=format:", "HEAD"))
+	if len(committed) != 1 || committed[0] != "production/app.enc.yaml" {
+		t.Fatalf("expected only the secret in the commit, got %v", committed)
+	}
+	status := gitOutput(t, repoRoot, "status", "--porcelain")
+	if !strings.Contains(status, "A  notes.txt") {
+		t.Fatalf("expected unrelated staged file to stay staged, got %q", status)
+	}
+}
 func TestHistoryAndDiffOperateOnSingleFile(t *testing.T) {
 	repoRoot := newGitRepo(t)
 	target := filepath.Join(repoRoot, "secret.enc.yaml")

@@ -44,7 +44,7 @@ SOPS already solves encryption and editing well. Keyseal stays one layer above t
 - Go 1.27+ to build the CLI
 - age recipients configured in `.sops.yaml`
 
-Developer/admin machines that run `keyseal add`, `keyseal edit`, or `keyseal updatekeys` also need the external `sops` binary.
+Developer/admin machines that run `keyseal add`, `keyseal edit`, `keyseal updatekeys`, or the mutation commands (`clone`, `set`, `unset`, `generate`, `import`) also need the external `sops` binary (3.9 or newer).
 
 Production, CI, or deploy machines that only run `keyseal render`, `keyseal exec`, `keyseal doctor`, or `keyseal verify` need only:
 
@@ -102,6 +102,11 @@ make build
 - `keyseal init` bootstraps a repository layout, `keyseal.yaml`, and `.sops.yaml`
 - `keyseal add <logical-name>` creates and encrypts a starter env secret document, with optional immediate Git commit support
 - `keyseal edit <logical-name>` opens the target file with `sops`, bootstrapping empty placeholder files first when needed
+- `keyseal clone <source> <destination>` copies a document to a new logical name, re-encrypted for the destination's `.sops.yaml` rule
+- `keyseal set <logical-name> <KEY> --stdin|--fd N` sets one value read from stdin or a file descriptor
+- `keyseal unset <logical-name> <KEY>...` removes keys, failing without changes if any key is absent
+- `keyseal generate <logical-name> <KEY>...` sets keys to cryptographically secure random values
+- `keyseal import <logical-name> --from-env-file <path> --keys <KEY,...>` copies selected values from a dotenv file
 - `keyseal updatekeys [logical-name...]` syncs SOPS recipients from `.sops.yaml`, with optional explicit Git commit support
 - `keyseal status [logical-name]` shows Git status for Keyseal-managed files
 - `keyseal diff <logical-name>` shows `git diff` for one secret file
@@ -129,6 +134,11 @@ Detailed flags, examples, and behavior notes live in the [Command Reference](htt
 ```bash
 keyseal add production/platform/app --template laravel
 keyseal edit production/platform/app
+keyseal clone production/platform/app production/platform/app-next
+printf '%s' "$STRIPE_SECRET_KEY" | keyseal set production/platform/app-next STRIPE_SECRET_KEY --stdin
+keyseal unset production/platform/app-next TWILIO_TOKEN
+keyseal generate production/platform/app-next APP_SIGNING_KEY --bytes 32
+keyseal import production/platform/app-next --from-env-file ./intake.env --keys STRIPE_SECRET_KEY,STRIPE_PUBLIC_KEY -m "Prepare app candidate"
 keyseal updatekeys production/platform/app --yes
 keyseal status production/platform/app
 keyseal history production/platform/app --oneline
@@ -145,7 +155,13 @@ keyseal verify
 Key workflow details:
 
 - `-m, --message` implies commit on mutating commands
+- `--commit` commits only the files the command changed; anything else you have staged stays staged
 - `git.auto_commit` is off by default
+- `set` reads values only from stdin or a file descriptor, never from arguments; on a terminal it prompts without echo
+- each `clone`, `set`, `unset`, `generate`, or `import` run is one transaction: the document is re-encrypted with the `.sops.yaml` rule for its path, decrypted again to verify it, and only then replaces the original; on any failure the original is left untouched
+- mutations refuse to write if the `.sops.yaml` rule for the path would leave any secret value unencrypted, for example an `encrypted_regex` that does not cover `values`
+- because mutations re-encrypt, they also apply any recipient changes in `.sops.yaml` that `updatekeys` has not yet synced
+- mutation commands print key names and actions only, never values
 - `sops.age_key_file` is used as the default age key path unless `SOPS_AGE_KEY_FILE` is already set
 - read-only decrypt paths use the SOPS Go library and do not require external `sops` or `age` binaries
 - mutating commands check the configured `sops.binary` before creating, editing, or rotating encrypted files

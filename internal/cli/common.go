@@ -23,10 +23,7 @@ type loadedDocuments struct {
 }
 
 func loadDocuments(cfg config.Config, cwd string, logicalNames []string) (loadedDocuments, error) {
-	opts := schema.DefaultValidationOptions()
-	opts.RequireValues = cfg.Validation.RequireValues
-	opts.KeyPattern = cfg.Validation.KeyPattern
-
+	opts := validationOptions(cfg)
 	root := cfg.RepoRoot(cwd)
 	ageKeyFile := config.ResolvePath(cwd, cfg.SOPS.AgeKeyFile)
 	result := loadedDocuments{
@@ -200,19 +197,19 @@ func stagePathsForEntries(ctx gitWorkflowContext, entries []gitutil.StatusEntry)
 	seen := map[string]struct{}{}
 	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		repoPath := entry.Path
-		if !isRelevantRepoPath(ctx, repoPath) && entry.OriginalPath != "" && isRelevantRepoPath(ctx, entry.OriginalPath) {
-			repoPath = entry.OriginalPath
+		// Both sides of a staged rename must be included, because commits are
+		// path-scoped and would otherwise leave the old path in HEAD.
+		for _, repoPath := range []string{entry.Path, entry.OriginalPath} {
+			if !isRelevantRepoPath(ctx, repoPath) {
+				continue
+			}
+			abs := filepath.Join(ctx.GitRoot, filepath.FromSlash(repoPath))
+			if _, ok := seen[abs]; ok {
+				continue
+			}
+			seen[abs] = struct{}{}
+			paths = append(paths, abs)
 		}
-		if !isRelevantRepoPath(ctx, repoPath) {
-			continue
-		}
-		abs := filepath.Join(ctx.GitRoot, filepath.FromSlash(repoPath))
-		if _, ok := seen[abs]; ok {
-			continue
-		}
-		seen[abs] = struct{}{}
-		paths = append(paths, abs)
 	}
 	slices.Sort(paths)
 	return paths
@@ -226,10 +223,7 @@ func commitPaths(ctx gitWorkflowContext, paths []string, message string) error {
 	if err := ensureRepoReadyForCommit(ctx); err != nil {
 		return err
 	}
-	if err := gitutil.StagePaths("git", ctx.GitRoot, paths); err != nil {
-		return err
-	}
-	return gitutil.Commit("git", ctx.GitRoot, message)
+	return gitutil.CommitPaths("git", ctx.GitRoot, message, paths)
 }
 
 func formatStatusEntries(entries []gitutil.StatusEntry) string {
@@ -249,6 +243,18 @@ func defaultCommitMessageForSecretAdd(logical string) string {
 
 func defaultCommitMessageForSecretEdit(logical string) string {
 	return fmt.Sprintf("Update secret %s", logical)
+}
+
+func defaultCommitMessageForSecretUnset(logical string) string {
+	return fmt.Sprintf("Remove keys from secret %s", logical)
+}
+
+func defaultCommitMessageForSecretGenerate(logical string) string {
+	return fmt.Sprintf("Generate values in secret %s", logical)
+}
+
+func defaultCommitMessageForSecretImport(logical string) string {
+	return fmt.Sprintf("Import values into secret %s", logical)
 }
 
 func defaultCommitMessageForSecretRollback(logical, revision string) string {
