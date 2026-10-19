@@ -19,6 +19,12 @@ Highlights:
 - `keyseal unset` fails clearly when a key is not present instead of reporting success
 - `--commit` now commits only the files the command changed, leaving your other staged work alone
 - `keyseal add` and `keyseal edit` no longer write a temporary plaintext file while encrypting
+- declarative secret contracts in `keyseal.yaml` can require, forbid, and constrain keys across one or more documents
+- contracts support minimum length, regex, non-empty, equality, inequality, distinct values, and conditional requirements
+- `keyseal doctor` reports malformed contract definitions and missing contract documents without decrypting values
+- `keyseal verify` evaluates every contract against decrypted secrets and fails when any rule is violated
+- new `keyseal validate <contract>` evaluates one named contract with optional machine-readable `--json` output
+- contract failures report key names and rule kinds only, never secret values
 
 ## v1.1.0
 

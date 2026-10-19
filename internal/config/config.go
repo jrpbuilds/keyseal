@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jrpbuilds/keyseal/internal/contract"
 	"github.com/jrpbuilds/keyseal/internal/fsutil"
 	"github.com/jrpbuilds/keyseal/internal/repo"
 )
@@ -44,6 +45,14 @@ type Config struct {
 	Defaults   DefaultsConfig     `yaml:"defaults"`
 	Validation ValidationConfig   `yaml:"validation"`
 	Profiles   map[string]Profile `yaml:"profiles"`
+
+	// Contracts are decoded strictly from the contracts YAML node and are not
+	// populated by the lax top-level yaml.Unmarshal used for the rest of the
+	// config. yaml:"-" keeps that pin intact.
+	Contracts map[string]contract.Definition `yaml:"-"`
+	// ContractProblems holds per-contract definition or from-file failures.
+	// Load fails when any exist; LoadLenient keeps them for doctor reporting.
+	ContractProblems []contract.Problem `yaml:"-"`
 }
 
 // RepositoryConfig controls repository-root and encrypted file naming behavior.
@@ -122,6 +131,7 @@ func Default() Config {
 		Profiles: map[string]Profile{
 			"default": {Renders: []RenderProfile{}},
 		},
+		Contracts: map[string]contract.Definition{},
 	}
 }
 
@@ -167,6 +177,19 @@ func load(path string) (Config, error) {
 	}
 
 	cfg.applyDefaults()
+
+	// Contracts are decoded strictly from the raw YAML after defaults so
+	// validation.key_pattern is available. Failures are recorded as problems
+	// rather than aborting load, so LoadLenient can surface them in doctor.
+	result, err := contract.LoadFromConfigYAML(data, filepath.Dir(path), cfg.Validation.KeyPattern)
+	if err != nil {
+		return Config{}, fmt.Errorf("contracts: %w", err)
+	}
+	cfg.Contracts = result.Contracts
+	cfg.ContractProblems = result.Problems
+	if cfg.Contracts == nil {
+		cfg.Contracts = map[string]contract.Definition{}
+	}
 	return cfg, nil
 }
 
@@ -209,15 +232,27 @@ func (c *Config) applyDefaults() {
 	if _, ok := c.Profiles["default"]; !ok {
 		c.Profiles["default"] = Profile{Renders: []RenderProfile{}}
 	}
+	if c.Contracts == nil {
+		c.Contracts = def.Contracts
+	}
 }
 
 // Validate checks the semantic constraints of a loaded config file, including
-// every profile render definition.
+// every profile render definition and every secret contract definition.
 func (c Config) Validate() error {
 	if err := c.validateBase(); err != nil {
 		return err
 	}
-	return c.ValidateProfiles()
+	if err := c.ValidateProfiles(); err != nil {
+		return err
+	}
+	return c.ValidateContracts()
+}
+
+// ValidateContracts fails fast on the first contract definition or from-file
+// problem discovered during strict decode.
+func (c Config) ValidateContracts() error {
+	return contract.FirstProblem(c.ContractProblems)
 }
 
 // validateBase checks the non-profile semantic constraints of a loaded config.

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jrpbuilds/keyseal/internal/config"
+	"github.com/jrpbuilds/keyseal/internal/contract"
 	"github.com/jrpbuilds/keyseal/internal/fsutil"
 	"github.com/jrpbuilds/keyseal/internal/repo"
 	"github.com/jrpbuilds/keyseal/internal/schema"
@@ -51,6 +52,7 @@ func Run(cwd string) (Result, error) {
 	repoRootReady := runRepositoryRootCheck(repoRoot, &result)
 	runOutputPathChecks(cfg, &result)
 	runProfileChecks(cfg, cwd, &result)
+	runContractDefinitionChecks(cfg, cwd, &result)
 	runRepoArtifactChecks(repoRoot, &result)
 
 	if !repoRootReady {
@@ -385,6 +387,62 @@ func runProfileChecks(cfg config.Config, cwd string, result *Result) {
 			}
 		}
 		result.Add(duplicateCheck)
+	}
+}
+
+// runContractDefinitionChecks reports malformed contract definitions and
+// missing document files as discrete checks. It never decrypts secrets or
+// evaluates contract rules against values.
+func runContractDefinitionChecks(cfg config.Config, cwd string, result *Result) {
+	for _, problem := range cfg.ContractProblems {
+		name := problem.Name
+		if name == "" {
+			name = "contracts"
+		}
+		result.Add(CheckResult{
+			Name:     fmt.Sprintf("contract %q", name),
+			Status:   StatusFail,
+			Severity: SeverityError,
+			Summary:  fmt.Sprintf("Contract %q has an invalid definition", name),
+			Details: []string{
+				problem.Message,
+			},
+			Remediation: []string{
+				"Fix the contract definition in keyseal.yaml or its from: file, then rerun `keyseal doctor`.",
+			},
+		})
+	}
+
+	repoRoot := cfg.RepoRoot(cwd)
+	for _, name := range slices.Sorted(maps.Keys(cfg.Contracts)) {
+		def := cfg.Contracts[name]
+		existence := contract.DocumentExistenceProblems(def, repoRoot, cfg.Repository.EncryptedExtension)
+		if len(existence) > 0 {
+			details := make([]string, 0, len(existence))
+			for _, problem := range existence {
+				details = append(details, problem.Message)
+			}
+			result.Add(CheckResult{
+				Name:     fmt.Sprintf("contract %q", name),
+				Status:   StatusFail,
+				Severity: SeverityError,
+				Summary:  fmt.Sprintf("Contract %q references missing documents", name),
+				Details:  details,
+				Remediation: []string{
+					fmt.Sprintf("Create the missing encrypted documents listed by contract %q, or update its documents list.", name),
+				},
+			})
+			continue
+		}
+		result.Add(CheckResult{
+			Name:     fmt.Sprintf("contract %q", name),
+			Status:   StatusOK,
+			Severity: SeverityInformational,
+			Summary:  "Contract definition is well-formed and its documents exist",
+			Details: []string{
+				fmt.Sprintf("Documents: %s", strings.Join(def.Documents, ", ")),
+			},
+		})
 	}
 }
 

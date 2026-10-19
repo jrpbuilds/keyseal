@@ -24,3 +24,25 @@ validation:
 profiles:
   default:
     renders: []
+
+# Optional declarative contracts. doctor checks definitions; verify and
+# validate evaluate decrypted values without printing them.
+contracts:
+  production-app:
+    documents:
+      - production/platform/app
+    required:
+      - APP_KEY
+      - DB_PASSWORD
+    forbidden:
+      - TWILIO_TOKEN
+    rules:
+      - key: DB_PASSWORD
+        min_length: 16
+      - key: APP_KEY
+        non_empty: true
+      - when:
+          key: FEATURE_BILLING
+          equals: "true"
+        require:
+          - BILLING_WEBHOOK_SECRET

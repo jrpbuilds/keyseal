@@ -115,8 +115,9 @@ make build
 - `keyseal rollback <logical-name> --to <commit>` restores one secret file from Git history
 - `keyseal render <logical-name...>` decrypts, merges, and renders secret values, skipping empty placeholder files
 - `keyseal exec <logical-name...> -- <command...>` runs a child process with merged env vars
-- `keyseal doctor` validates config sanity, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, and common mistakes
-- `keyseal verify` runs strict CI checks and fails on any doctor warning or failure
+- `keyseal doctor` validates config sanity, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, contract definitions, and common mistakes
+- `keyseal verify` runs strict CI checks, evaluates every declarative secret contract, and fails on any warning or failure
+- `keyseal validate <contract>` evaluates one named contract against decrypted values with optional `--json` output
 - `keyseal version` reports version, commit, and build date metadata
 
 Detailed flags, examples, and behavior notes live in the [Command Reference](https://github.com/jrpbuilds/keyseal/wiki/Command-Reference) and [wiki](https://github.com/jrpbuilds/keyseal/wiki).
@@ -150,6 +151,7 @@ keyseal exec production/platform/app -- php artisan migrate
 keyseal rollback production/platform/app --to <commit> --dry-run
 keyseal doctor
 keyseal verify
+keyseal validate production-app --json
 ```
 
 Key workflow details:
@@ -169,6 +171,11 @@ Key workflow details:
 - `keyseal commit` stages only Keyseal-managed files, not the whole repo
 - `rollback` restores the encrypted file from Git history; `--dry-run` previews safely
 - `profiles` in `keyseal.yaml` group render definitions; all profiles are validated on every config load, so a malformed profile blocks any command until fixed
+- `contracts` in `keyseal.yaml` declare generic secret requirements (required/forbidden keys, length/regex/non-empty rules, equality, and conditionals); bare keys use last-wins merge across listed documents
+- `required` means the key is present (empty string is allowed); use `non_empty` when whitespace-only values must fail
+- `doctor` checks that contract definitions are well-formed and that listed documents exist; it does not evaluate secret values
+- `verify` and `validate` decrypt referenced documents and evaluate contract rules, reporting key names and failed rules without printing values
+- a contract entry may set `from: path/to/file.yaml` (relative to `keyseal.yaml`) instead of an inline body
 - `render --profile --dry-run` decrypts and fully validates inputs (age key material required) but writes nothing and prints only the plan
 
 For exact command behavior and more examples, see the [Command Reference](https://github.com/jrpbuilds/keyseal/wiki/Command-Reference), [Configuration Reference](https://github.com/jrpbuilds/keyseal/wiki/Configuration-Reference), and [Troubleshooting](https://github.com/jrpbuilds/keyseal/wiki/Troubleshooting) wiki pages.
