@@ -4,7 +4,7 @@ All notable changes to Keyseal will be documented in this file.
 
 The format is intentionally lightweight and optimized for public release tags.
 
-## v1.2.0 (unreleased)
+## v1.2.0 (2026-10-19)
 
 Highlights:
 - `keyseal render --profile <name>` executes every render defined by a profile in `keyseal.yaml`, resolving, decrypting, and pre-flighting all outputs before any write
@@ -25,6 +25,8 @@ Highlights:
 - `keyseal verify` evaluates every contract against decrypted secrets and fails when any rule is violated
 - new `keyseal validate <contract>` evaluates one named contract with optional machine-readable `--json` output
 - contract failures report key names and rule kinds only, never secret values
+- Keyseal now builds with Go 1.27.2
+- dependency updates close the HTTP/2 findings from the vulnerability scan
 
 ## v1.1.0
 
