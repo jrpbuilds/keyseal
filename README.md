@@ -109,7 +109,9 @@ make build
 - `keyseal import <logical-name> --from-env-file <path> --keys <KEY,...>` copies selected values from a dotenv file
 - `keyseal updatekeys [logical-name...]` syncs SOPS recipients from `.sops.yaml`, with optional explicit Git commit support
 - `keyseal status [logical-name]` shows Git status for Keyseal-managed files
-- `keyseal diff <logical-name>` shows `git diff` for one secret file
+- `keyseal diff <logical-name>` shows `git diff` for one secret file; `--semantic` compares decrypted key states against `HEAD` or `--to <revision>` without showing values
+- `keyseal inspect <logical-name>` reports each key as present, empty, or missing without showing values
+- `keyseal compare <left> <right>` reports each key as equal, different, added, or removed, with `--assert-equal` and `--assert-unequal` for CI
 - `keyseal history <logical-name>` shows file-scoped Git history for one secret file
 - `keyseal commit` stages current Keyseal-managed changes and creates a Git commit
 - `keyseal rollback <logical-name> --to <commit>` restores one secret file from Git history
@@ -142,6 +144,9 @@ keyseal generate production/platform/app-next APP_SIGNING_KEY --bytes 32
 keyseal import production/platform/app-next --from-env-file ./intake.env --keys STRIPE_SECRET_KEY,STRIPE_PUBLIC_KEY -m "Prepare app candidate"
 keyseal updatekeys production/platform/app --yes
 keyseal status production/platform/app
+keyseal diff production/platform/app --semantic
+keyseal inspect production/platform/app --json --key DATABASE_URL --show-length --show-type
+keyseal compare production/platform/app production/platform/app-next --key CENTRAL_API_SECRET --assert-equal
 keyseal history production/platform/app --oneline
 keyseal commit -m "Update production app secret"
 keyseal render production/platform/app --stdout --format json
@@ -170,6 +175,11 @@ Key workflow details:
 - `updatekeys` uses `.sops.yaml` as the recipient source of truth and does not rotate secret values or data encryption keys
 - `keyseal commit` stages only Keyseal-managed files, not the whole repo
 - `rollback` restores the encrypted file from Git history; `--dry-run` previews safely
+- `inspect`, `compare`, and `diff --semantic` decrypt in memory and print key names, states, and outcomes only, never values; they need your age key
+- `inspect` and `compare` exit 1 for a missing file, an empty placeholder, plaintext at an encrypted path, or a decrypt failure; `diff --semantic` also accepts one side being absent, such as a file added since the revision
+- `--assert-equal` and `--assert-unequal` exit 1 when the assertion does not hold; use `--key` (repeatable) to assert on specific keys, and `--json` for automation
+- `--show-length`, `--show-type`, and `--fingerprint` add optional metadata and never change an outcome; `--fingerprint` is a keyed HMAC-SHA256 using the key file named by `KEYSEAL_FINGERPRINT_KEY_FILE` (at least 32 bytes), never an unsalted hash
+- `diff --semantic` compares the working tree with the revision, so staged and unstaged edits both appear; flagless `diff` still shows the ciphertext `git diff` and needs no age key
 - `profiles` in `keyseal.yaml` group render definitions; all profiles are validated on every config load, so a malformed profile blocks any command until fixed
 - `contracts` in `keyseal.yaml` declare generic secret requirements (required/forbidden keys, length/regex/non-empty rules, equality, and conditionals); bare keys use last-wins merge across listed documents
 - `required` means the key is present (empty string is allowed); use `non_empty` when whitespace-only values must fail

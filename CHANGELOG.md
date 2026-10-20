@@ -25,6 +25,10 @@ Highlights:
 - `keyseal verify` evaluates every contract against decrypted secrets and fails when any rule is violated
 - new `keyseal validate <contract>` evaluates one named contract with optional machine-readable `--json` output
 - contract failures report key names and rule kinds only, never secret values
+- new `keyseal inspect <name>` shows whether each key is present, empty, or missing without printing any values
+- new `keyseal compare <left> <right>` reports each key as equal, different, added, or removed, with `--assert-equal` and `--assert-unequal` for CI
+- `keyseal diff <name> --semantic` compares a secret with `HEAD` or `--to <revision>` key by key, without showing values
+- inspect, compare, and semantic diff can add value length, type, or a keyed fingerprint, and support `--json` for scripts
 - Keyseal now builds with Go 1.27.2
 - dependency updates close the HTTP/2 findings from the vulnerability scan
 
