@@ -11,10 +11,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Well-known errors returned by the git helpers.
@@ -24,6 +26,8 @@ var (
 	ErrNothingToCommit     = errors.New("nothing to commit")
 	ErrConflictedRepo      = errors.New("Git repository has unresolved conflicts")
 	ErrFileHasLocalChanges = errors.New("target file has local changes")
+	ErrUnknownRevision     = errors.New("git revision not found")
+	ErrBlobAbsent          = errors.New("path is not in the revision")
 )
 
 // StatusEntry models one line of `git status --porcelain=v1` output.
@@ -277,6 +281,70 @@ func RevisionContainsPath(binary, repoRoot, revision, path string) (bool, error)
 	default:
 		return false, fmt.Errorf("check git revision path: %w", err)
 	}
+}
+
+// ReadBlob returns the raw bytes of path at revision without touching the
+// working tree.
+//
+// ErrUnknownRevision means the revision does not resolve to a commit, and
+// ErrBlobAbsent means the revision exists but does not contain path. Callers
+// need the two apart, which RevisionContainsPath cannot offer. The returned
+// bytes are stored file content and must not be printed. Git output is never
+// copied into an error because a failed read could carry part of the blob.
+func ReadBlob(binary, repoRoot, revision, path string) ([]byte, error) {
+	if !isSafeRevision(revision) {
+		return nil, ErrUnknownRevision
+	}
+	pathspec, err := Pathspec(repoRoot, path)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, code, err := runDiscardingStderr(repoRoot, binary, "rev-parse", "--verify", "--quiet", "--end-of-options", revision+"^{commit}"); err != nil {
+		if code > 0 {
+			return nil, ErrUnknownRevision
+		}
+		return nil, errors.New("read git blob: git could not be run")
+	}
+
+	object := revision + ":" + pathspec
+	if _, code, err := runDiscardingStderr(repoRoot, binary, "cat-file", "-e", object); err != nil {
+		if code == 128 {
+			return nil, ErrBlobAbsent
+		}
+		return nil, errors.New("read git blob: git could not check the path")
+	}
+
+	blob, _, err := runDiscardingStderr(repoRoot, binary, "cat-file", "blob", object)
+	if err != nil {
+		return nil, errors.New("read git blob: git could not read the path")
+	}
+	return blob, nil
+}
+
+// isSafeRevision rejects values git could parse as an option, a revision:path
+// object, or several arguments. Arguments go to exec directly, never a shell.
+func isSafeRevision(revision string) bool {
+	if revision == "" || strings.HasPrefix(revision, "-") || strings.Contains(revision, ":") {
+		return false
+	}
+	return !strings.ContainsFunc(revision, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	})
+}
+
+// runDiscardingStderr returns stdout and the exit code when git exits non-zero.
+// It exists because runCaptured folds command output into its errors.
+func runDiscardingStderr(dir, binary string, args ...string) ([]byte, int, error) {
+	var stdout bytes.Buffer
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = dir
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return nil, exitCode(err), err
+	}
+	return stdout.Bytes(), 0, nil
 }
 
 // RestoreFile updates the working tree copy of path to match revision.
