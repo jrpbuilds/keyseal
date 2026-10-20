@@ -288,9 +288,9 @@ func RevisionContainsPath(binary, repoRoot, revision, path string) (bool, error)
 //
 // ErrUnknownRevision means the revision does not resolve to a commit, and
 // ErrBlobAbsent means the revision exists but does not contain path. Callers
-// need the two apart, which RevisionContainsPath cannot offer. The returned
-// bytes are stored file content and must not be printed. Git output is never
-// copied into an error because a failed read could carry part of the blob.
+// need the two apart. The returned bytes are stored file content and must not
+// be printed. Git output is never copied into an error because a failed read
+// could carry part of the blob.
 func ReadBlob(binary, repoRoot, revision, path string) ([]byte, error) {
 	if !isSafeRevision(revision) {
 		return nil, ErrUnknownRevision

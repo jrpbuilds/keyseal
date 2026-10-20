@@ -42,7 +42,6 @@ func (s side) wire() sideWire {
 	}
 }
 
-// header is the text form of a side's identity.
 func (s side) header() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "name=%s source=%s", s.name, s.source)

@@ -1,10 +1,4 @@
 // Package redact turns decrypted env documents into value-free key facts.
-//
-// No exported type here has a field that can hold a secret value, so a report
-// built from these types cannot print one. The only code that sees values is
-// the YAML walk in walk.go, and its locals die before it returns.
-//
-// The package sits below internal/observe so internal/cli cannot import it.
 package redact
 
 import (

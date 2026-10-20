@@ -57,8 +57,6 @@ type Source struct {
 	Absent    bool
 }
 
-// entry is the walk's local record. Its value field is the only place a secret
-// lives, and no entry leaves this package.
 type entry struct {
 	state KeyState
 	value string

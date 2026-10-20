@@ -13,7 +13,6 @@ import (
 	"github.com/jrpbuilds/keyseal/internal/config"
 )
 
-// Disposable age identities used only by these tests.
 const (
 	testAgeKey = `# public key: age1xlp99sh4c9dheuskt900y83mdcxdhjp0zhejf2l4lkh6fdzl0dsqsx4yrx
 AGE-SECRET-KEY-1640MNDQ274MATFJR6D6R6GFW3FUDJLDUAM84TXRM9L70FUCEXV0QMEH0CE

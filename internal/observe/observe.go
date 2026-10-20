@@ -1,9 +1,6 @@
 // Package observe loads secret documents and returns value-free reports.
 //
-// Inspect and Compare never return plaintext, ciphertext, or value maps. The
-// decrypted bytes live in locals that are cleared before the call returns, and
-// the pure YAML walk that reads them sits in a Go-internal package that
-// internal/cli cannot import.
+// Inspect and Compare never return plaintext, ciphertext, or value maps.
 package observe
 
 import (
