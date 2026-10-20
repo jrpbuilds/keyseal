@@ -42,6 +42,40 @@ func TestClassifyRecognizesStates(t *testing.T) {
 	}
 }
 
+func TestClassifyBytesMatchesClassifyForEveryFileState(t *testing.T) {
+	dir := t.TempDir()
+	bodies := map[string]string{
+		"placeholder": " \n\t\n",
+		"encrypted":   "values:\n  APP_ENV: ENC[test]\nsops:\n  version: 3.9.0\n",
+		"plaintext":   "values:\n  APP_ENV: production\n",
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name+".enc.yaml")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatalf("WriteFile returned error: %v", err)
+			}
+			fromPath, err := secretfile.Classify(path)
+			if err != nil {
+				t.Fatalf("Classify returned error: %v", err)
+			}
+			fromBytes := secretfile.ClassifyBytes([]byte(body))
+			if fromBytes.State != fromPath.State || string(fromBytes.Raw) != string(fromPath.Raw) {
+				t.Fatalf("ClassifyBytes = %q, Classify = %q", fromBytes.State, fromPath.State)
+			}
+			if string(fromBytes.State) != name {
+				t.Fatalf("expected state %q, got %q", name, fromBytes.State)
+			}
+		})
+	}
+}
+
+func TestClassifyBytesTreatsEmptyInputAsPlaceholder(t *testing.T) {
+	if got := secretfile.ClassifyBytes(nil).State; got != secretfile.StatePlaceholder {
+		t.Fatalf("expected placeholder, got %q", got)
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }
