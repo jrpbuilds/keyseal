@@ -34,6 +34,9 @@ func newRootCommand() *cobra.Command {
 			"  keyseal add production/platform/app --template laravel\n" +
 			"  keyseal status\n" +
 			"  keyseal diff production/platform/app\n" +
+			"  keyseal diff production/platform/app --semantic\n" +
+			"  keyseal inspect production/platform/app\n" +
+			"  keyseal compare production/platform/app production/platform/app-next --assert-unequal\n" +
 			"  keyseal history production/platform/app\n" +
 			"  keyseal commit -m \"Rotate Stripe webhook secret\"\n" +
 			"  keyseal edit production/platform/app\n" +
@@ -74,6 +77,8 @@ func newRootCommand() *cobra.Command {
 		newImportCommand(),
 		newStatusCommand(),
 		newDiffCommand(),
+		newInspectCommand(),
+		newCompareCommand(),
 		newHistoryCommand(),
 		newCommitCommand(),
 		newUpdateKeysCommand(),
