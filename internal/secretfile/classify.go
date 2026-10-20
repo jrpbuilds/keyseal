@@ -35,11 +35,18 @@ func Classify(path string) (Classification, error) {
 		}
 		return Classification{}, fmt.Errorf("read secret file: %w", err)
 	}
+	return ClassifyBytes(raw), nil
+}
+
+// ClassifyBytes applies Classify's rules to bytes already in memory, such as a
+// Git blob. It has no missing state: callers map an absent file to
+// StateMissing themselves.
+func ClassifyBytes(raw []byte) Classification {
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return Classification{State: StatePlaceholder, Raw: raw}, nil
+		return Classification{State: StatePlaceholder, Raw: raw}
 	}
 	if schema.HasSOPSMetadata(raw) {
-		return Classification{State: StateEncrypted, Raw: raw}, nil
+		return Classification{State: StateEncrypted, Raw: raw}
 	}
-	return Classification{State: StatePlaintext, Raw: raw}, nil
+	return Classification{State: StatePlaintext, Raw: raw}
 }
