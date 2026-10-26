@@ -2,9 +2,13 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jrpbuilds/keyseal/internal/buildinfo"
+	"github.com/jrpbuilds/keyseal/internal/doctor"
 )
 
 // TestVerifyPassesOnCleanRepository verifies strict verification succeeds when
@@ -103,6 +107,177 @@ func TestVerifyJSONOutput(t *testing.T) {
 	}
 	if len(payload.Checks) == 0 {
 		t.Fatalf("expected checks in verify json, got %#v", payload)
+	}
+}
+
+func TestVerifyFailsOnKeysealVersionRequirement(t *testing.T) {
+	orig := buildinfo.Version
+	buildinfo.Version = "v0.2.0"
+	t.Cleanup(func() { buildinfo.Version = orig })
+
+	repoRoot := seedVerifyRepo(t)
+	configureVersionOnlySOPS(t, repoRoot)
+	configureFakeAge(t, repoRoot)
+	writeEncryptedFixture(t, repoRoot, "production/platform/app.enc.yaml")
+
+	cfgPath := filepath.Join(repoRoot, "keyseal.yaml")
+	body, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	body = append(body, []byte("\nrequirements:\n  keyseal: \">=1.1.0\"\n")...)
+	if err := os.WriteFile(cfgPath, body, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	output, runErr := runRootCommand(t, repoRoot, "verify", "--json")
+	if runErr == nil {
+		t.Fatal("expected verify to fail when Keyseal binary is too old")
+	}
+
+	var payload struct {
+		Verified bool `json:"verified"`
+		Checks   []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"checks"`
+	}
+	if unmarshalErr := json.Unmarshal([]byte(output), &payload); unmarshalErr != nil {
+		t.Fatalf("Unmarshal returned error: %v\noutput=%s", unmarshalErr, output)
+	}
+	if payload.Verified {
+		t.Fatal("expected verified=false")
+	}
+	foundVersion := false
+	foundSecretDiscoverySkip := false
+	for _, check := range payload.Checks {
+		switch check.Name {
+		case doctor.CheckNameKeysealVersion:
+			foundVersion = true
+			if check.Status != "fail" {
+				t.Fatalf("expected keyseal version fail, got %#v", check)
+			}
+		case "secret discovery":
+			foundSecretDiscoverySkip = true
+			if check.Status != "skip" {
+				t.Fatalf("expected secret discovery skip, got %#v", check)
+			}
+		default:
+			if strings.HasPrefix(check.Name, "secret ") && check.Status != "skip" {
+				t.Fatalf("expected no per-secret decrypt checks when version fails, got %#v", check)
+			}
+		}
+	}
+	if !foundVersion {
+		t.Fatalf("expected %q check in verify json, got %#v", doctor.CheckNameKeysealVersion, payload.Checks)
+	}
+	if !foundSecretDiscoverySkip {
+		t.Fatalf("expected secret discovery skip in verify json, got %#v", payload.Checks)
+	}
+}
+
+func TestValidateFailsOnKeysealVersionRequirement(t *testing.T) {
+	orig := buildinfo.Version
+	buildinfo.Version = "v0.2.0"
+	t.Cleanup(func() { buildinfo.Version = orig })
+
+	repoRoot := seedContractRepo(t, `  production-app:
+    documents: [production/platform/app]
+    required: [APP_ENV]
+`)
+	appendRequirementsYAML(t, repoRoot, ">=1.1.0")
+
+	output, err := runRootCommand(t, repoRoot, "validate", "production-app", "--json")
+	if err == nil {
+		t.Fatal("expected validate to fail when Keyseal binary is too old")
+	}
+	var payload struct {
+		Passed bool   `json:"passed"`
+		Error  string `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal([]byte(output), &payload); unmarshalErr != nil {
+		t.Fatalf("Unmarshal returned error: %v\n%s", unmarshalErr, output)
+	}
+	if payload.Passed {
+		t.Fatal("expected passed=false")
+	}
+	if !strings.Contains(payload.Error, "v0.2.0") || !strings.Contains(payload.Error, ">=1.1.0") {
+		t.Fatalf("validate error should name running and required versions, got %q", payload.Error)
+	}
+	for _, marker := range secretPlaintextMarkers() {
+		if strings.Contains(output, marker) || strings.Contains(payload.Error, marker) {
+			t.Fatalf("validate leaked decrypted secret content %q: %q", marker, output)
+		}
+	}
+}
+
+func TestRenderFailsOnKeysealVersionRequirement(t *testing.T) {
+	orig := buildinfo.Version
+	buildinfo.Version = "v0.2.0"
+	t.Cleanup(func() { buildinfo.Version = orig })
+
+	repoRoot := seedVerifyRepo(t)
+	configureVersionOnlySOPS(t, repoRoot)
+	configureFakeAge(t, repoRoot)
+	writeEncryptedFixture(t, repoRoot, "production/platform/app.enc.yaml")
+	appendRequirementsYAML(t, repoRoot, ">=1.1.0")
+
+	outPath := filepath.Join(repoRoot, "should-not-write.env")
+	output, err := runRootCommand(t, repoRoot, "render", "production/platform/app", "--out", outPath)
+	if err == nil {
+		t.Fatal("expected render to fail when Keyseal binary is too old")
+	}
+	msg := err.Error()
+	if output != "" {
+		msg = output + "\n" + msg
+	}
+	if !strings.Contains(msg, "v0.2.0") || !strings.Contains(msg, ">=1.1.0") {
+		t.Fatalf("render error should name running and required versions, got %q", msg)
+	}
+	if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+		t.Fatalf("render must not write output when version requirement fails; stat=%v", statErr)
+	}
+}
+
+func TestAppendVerifyContractChecksFailsWhenConfigMissing(t *testing.T) {
+	dir := t.TempDir()
+	result := doctor.Result{}
+	result.Add(doctor.CheckResult{
+		Name:     "keyseal.yaml",
+		Status:   doctor.StatusOK,
+		Severity: doctor.SeverityInformational,
+		Summary:  "synthetic prior doctor success",
+	})
+
+	appendVerifyContractChecks(dir, &result)
+
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == CheckNameContractEvaluation {
+			found = true
+			if check.Status != doctor.StatusFail {
+				t.Fatalf("expected contract evaluation fail, got %#v", check)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected %q check, got %#v", CheckNameContractEvaluation, result.Checks)
+	}
+	if result.VerifyPassed() {
+		t.Fatal("expected verify to fail when config reload fails after doctor")
+	}
+}
+
+func appendRequirementsYAML(t *testing.T, root, constraint string) {
+	t.Helper()
+	path := filepath.Join(root, "keyseal.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	body = append(body, []byte("\nrequirements:\n  keyseal: \""+constraint+"\"\n")...)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 }
 

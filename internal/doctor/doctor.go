@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jrpbuilds/keyseal/internal/buildinfo"
 	"github.com/jrpbuilds/keyseal/internal/config"
 	"github.com/jrpbuilds/keyseal/internal/contract"
 	"github.com/jrpbuilds/keyseal/internal/fsutil"
@@ -18,6 +19,10 @@ import (
 	"github.com/jrpbuilds/keyseal/internal/sopsutil"
 	"github.com/jrpbuilds/keyseal/internal/toolcheck"
 )
+
+// CheckNameKeysealVersion is the stable doctor/verify JSON check name for
+// requirements.keyseal compatibility.
+const CheckNameKeysealVersion = "keyseal version"
 
 // Run executes the doctor checks for the current repository.
 func Run(cwd string) (Result, error) {
@@ -33,6 +38,7 @@ func Run(cwd string) (Result, error) {
 		runSOPSBinaryChecks(cfg, cwd, &result)
 		runAgeBinaryChecks(cfg, &result)
 		result.Add(configCheck)
+		runKeysealVersionCheck(cfg, &result)
 		runSOPSConfigChecks(cwd, &result)
 	} else {
 		runSOPSConfigChecks(cwd, &result)
@@ -48,12 +54,27 @@ func Run(cwd string) (Result, error) {
 		return result, nil
 	}
 
+	versionOK := !hasFailedCheck(result, CheckNameKeysealVersion)
+
 	repoRoot := cfg.RepoRoot(cwd)
 	repoRootReady := runRepositoryRootCheck(repoRoot, &result)
 	runOutputPathChecks(cfg, &result)
 	runProfileChecks(cfg, cwd, &result)
 	runContractDefinitionChecks(cfg, cwd, &result)
 	runRepoArtifactChecks(repoRoot, &result)
+
+	if !versionOK {
+		result.Add(CheckResult{
+			Name:     "secret discovery",
+			Status:   StatusSkip,
+			Severity: SeverityInformational,
+			Summary:  "Skipped secret discovery because the Keyseal binary does not satisfy requirements.keyseal",
+			Remediation: []string{
+				"Upgrade Keyseal so it satisfies requirements.keyseal, then rerun `keyseal doctor`.",
+			},
+		})
+		return result, nil
+	}
 
 	if !repoRootReady {
 		result.Add(CheckResult{
@@ -72,6 +93,64 @@ func Run(cwd string) (Result, error) {
 		return result, fmt.Errorf("run secret checks: %w", err)
 	}
 	return result, nil
+}
+
+func hasFailedCheck(result Result, name string) bool {
+	for _, check := range result.Checks {
+		if check.Name == name && check.Status == StatusFail {
+			return true
+		}
+	}
+	return false
+}
+
+// runKeysealVersionCheck reports whether the running binary satisfies
+// requirements.keyseal. Mismatches fail closed and cause Run to skip decrypt.
+func runKeysealVersionCheck(cfg config.Config, result *Result) {
+	running := buildinfo.DisplayVersion()
+	constraint := strings.TrimSpace(cfg.Requirements.Keyseal)
+	if constraint == "" {
+		result.Add(CheckResult{
+			Name:     CheckNameKeysealVersion,
+			Status:   StatusOK,
+			Severity: SeverityInformational,
+			Summary:  "No requirements.keyseal set",
+			Details: []string{
+				fmt.Sprintf("Running Keyseal binary version is %s.", running),
+			},
+		})
+		return
+	}
+
+	if err := cfg.CheckKeysealRequirement(running); err != nil {
+		result.Add(CheckResult{
+			Name:     CheckNameKeysealVersion,
+			Status:   StatusFail,
+			Severity: SeverityError,
+			Summary:  "Keyseal binary does not satisfy requirements.keyseal",
+			Details: []string{
+				fmt.Sprintf("Running Keyseal binary version: %s.", running),
+				fmt.Sprintf("Required by requirements.keyseal: %s.", constraint),
+				err.Error(),
+			},
+			Remediation: []string{
+				"Upgrade or replace the Keyseal binary so it satisfies the repository requirement.",
+				fmt.Sprintf("Verify with: keyseal version --check %q", constraint),
+			},
+		})
+		return
+	}
+
+	result.Add(CheckResult{
+		Name:     CheckNameKeysealVersion,
+		Status:   StatusOK,
+		Severity: SeverityInformational,
+		Summary:  "Keyseal binary satisfies requirements.keyseal",
+		Details: []string{
+			fmt.Sprintf("Running Keyseal binary version: %s.", running),
+			fmt.Sprintf("Required by requirements.keyseal: %s.", constraint),
+		},
+	})
 }
 
 func runConfigChecks(cwd string, result *Result) (config.Config, bool) {
@@ -909,10 +988,33 @@ func runSecretChecks(cwd, repoRoot string, cfg config.Config, result *Result) er
 	return nil
 }
 
-// classifyDecryptError keeps doctor error details behind one helper so future
-// backend-specific sanitization can happen without touching check assembly.
+// classifyDecryptError maps decrypt failures to stable, non-secret categories.
+// Raw backend error strings are never returned: they can include paths and
+// provider detail that should not appear in doctor/verify output.
 func classifyDecryptError(err error) string {
-	return err.Error()
+	if err == nil {
+		return "decryption failed"
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "permission denied"),
+		strings.Contains(msg, "no such file"),
+		strings.Contains(msg, "not exist"),
+		(strings.Contains(msg, "age") || strings.Contains(msg, "sops_age_key")) &&
+			(strings.Contains(msg, "missing") || strings.Contains(msg, "not found") || strings.Contains(msg, "unreadable")):
+		return "age key material is missing or unreadable"
+	case strings.Contains(msg, "no identity matched"),
+		strings.Contains(msg, "no key could decrypt"),
+		strings.Contains(msg, "failed to get the data key"),
+		strings.Contains(msg, "error getting data key"),
+		strings.Contains(msg, "could not decrypt"),
+		strings.Contains(msg, "unable to decrypt"),
+		strings.Contains(msg, "mac mismatch"),
+		strings.Contains(msg, "no matching"):
+		return "no matching age key could decrypt this file"
+	default:
+		return "decryption failed"
+	}
 }
 
 // dedupeStrings preserves first-seen order while removing repeated remediation

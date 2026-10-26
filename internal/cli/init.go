@@ -111,6 +111,10 @@ validation:
   require_values: %t
   key_pattern: %q
 
+# Optional: require a minimum Keyseal binary version for this repository.
+# requirements:
+#   keyseal: ">=1.1.0"
+
 profiles:
   %s:
     renders: []

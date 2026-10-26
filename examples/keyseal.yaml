@@ -21,6 +21,12 @@ validation:
   require_values: true
   key_pattern: '^[A-Z0-9_]+$'
 
+# Optional Keyseal binary constraint. Config-backed commands fail closed when
+# the installed binary does not satisfy it. Bootstrap tooling can also run
+# `keyseal version --check ">=1.1.0"` before loading this file.
+# requirements:
+#   keyseal: ">=1.1.0"
+
 profiles:
   default:
     renders: []
