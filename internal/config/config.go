@@ -11,9 +11,11 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jrpbuilds/keyseal/internal/buildinfo"
 	"github.com/jrpbuilds/keyseal/internal/contract"
 	"github.com/jrpbuilds/keyseal/internal/fsutil"
 	"github.com/jrpbuilds/keyseal/internal/repo"
+	"github.com/jrpbuilds/keyseal/internal/versionreq"
 )
 
 const (
@@ -38,13 +40,14 @@ var allowedOutputFormats = map[string]struct{}{
 
 // Config is the root representation of keyseal.yaml.
 type Config struct {
-	Version    int                `yaml:"version"`
-	Repository RepositoryConfig   `yaml:"repository"`
-	SOPS       SOPSConfig         `yaml:"sops"`
-	Git        GitConfig          `yaml:"git"`
-	Defaults   DefaultsConfig     `yaml:"defaults"`
-	Validation ValidationConfig   `yaml:"validation"`
-	Profiles   map[string]Profile `yaml:"profiles"`
+	Version      int                `yaml:"version"`
+	Repository   RepositoryConfig   `yaml:"repository"`
+	SOPS         SOPSConfig         `yaml:"sops"`
+	Git          GitConfig          `yaml:"git"`
+	Defaults     DefaultsConfig     `yaml:"defaults"`
+	Validation   ValidationConfig   `yaml:"validation"`
+	Requirements RequirementsConfig `yaml:"requirements"`
+	Profiles     map[string]Profile `yaml:"profiles"`
 
 	// Contracts are decoded strictly from the contracts YAML node and are not
 	// populated by the lax top-level yaml.Unmarshal used for the rest of the
@@ -53,6 +56,13 @@ type Config struct {
 	// ContractProblems holds per-contract definition or from-file failures.
 	// Load fails when any exist; LoadLenient keeps them for doctor reporting.
 	ContractProblems []contract.Problem `yaml:"-"`
+}
+
+// RequirementsConfig declares tooling compatibility constraints for this repo.
+type RequirementsConfig struct {
+	// Keyseal is a Masterminds-style semver constraint for the Keyseal binary
+	// (for example ">=1.1.0"). Empty means no requirement.
+	Keyseal string `yaml:"keyseal,omitempty"`
 }
 
 // RepositoryConfig controls repository-root and encrypted file naming behavior.
@@ -136,7 +146,12 @@ func Default() Config {
 }
 
 // Load reads keyseal.yaml, applies defaults for omitted optional fields, and
-// validates the final configuration, including profile render definitions.
+// validates the final configuration, including profile render definitions and
+// requirements.keyseal against the running binary.
+//
+// Load fails closed before callers decrypt or mutate secrets when the binary
+// does not satisfy requirements.keyseal. LoadLenient skips that binary check
+// so doctor can report a dedicated compatibility result.
 func Load(path string) (Config, error) {
 	cfg, err := load(path)
 	if err != nil {
@@ -148,10 +163,20 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// LoadLenient behaves like Load but skips profile-definition validation so
-// diagnostics such as doctor can enumerate individual profile problems as
-// granular checks instead of failing on the first malformed render. Every
-// other validation rule still applies.
+// CheckKeysealRequirement reports whether the running Keyseal binary satisfies
+// requirements.keyseal. It is a no-op when the requirement is unset.
+func (c Config) CheckKeysealRequirement(running string) error {
+	constraint := strings.TrimSpace(c.Requirements.Keyseal)
+	if constraint == "" {
+		return nil
+	}
+	return versionreq.Check(running, constraint)
+}
+
+// LoadLenient behaves like Load but skips profile-definition validation and
+// the running-binary requirements.keyseal check so diagnostics such as doctor
+// can enumerate individual profile problems and report compatibility as a
+// dedicated check. Every other validateBase rule still applies.
 func LoadLenient(path string) (Config, error) {
 	cfg, err := load(path)
 	if err != nil {
@@ -238,9 +263,17 @@ func (c *Config) applyDefaults() {
 }
 
 // Validate checks the semantic constraints of a loaded config file, including
-// every profile render definition and every secret contract definition.
+// requirements.keyseal against the running Keyseal binary, every profile
+// render definition, and every secret contract definition.
+//
+// The binary gate runs after validateBase and before profiles/contracts so an
+// unmet version requirement is not masked by later structural errors.
+// LoadLenient intentionally does not call Validate.
 func (c Config) Validate() error {
 	if err := c.validateBase(); err != nil {
+		return err
+	}
+	if err := c.CheckKeysealRequirement(buildinfo.DisplayVersion()); err != nil {
 		return err
 	}
 	if err := c.ValidateProfiles(); err != nil {
@@ -283,6 +316,15 @@ func (c Config) validateBase() error {
 	}
 	if _, err := regexp.Compile(c.Validation.KeyPattern); err != nil {
 		return fmt.Errorf("validation.key_pattern: %w", err)
+	}
+	if raw := c.Requirements.Keyseal; raw != "" {
+		constraint := strings.TrimSpace(raw)
+		if constraint == "" {
+			return errors.New("requirements.keyseal must not be empty or whitespace-only")
+		}
+		if _, err := versionreq.ParseConstraint(constraint); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jrpbuilds/keyseal/internal/buildinfo"
 	"github.com/jrpbuilds/keyseal/internal/config"
 	"github.com/jrpbuilds/keyseal/internal/doctor"
 	"github.com/spf13/cobra"
@@ -33,12 +34,7 @@ func newVerifyCommand() *cobra.Command {
 				return err
 			}
 
-			// Evaluate well-formed contracts after doctor definition checks.
-			// Re-load leniently so verify can access the decoded contract map
-			// without failing before doctor has already reported problems.
-			if cfg, loadErr := config.LoadLenient(filepath.Join(cwd, config.DefaultConfigPath)); loadErr == nil {
-				appendContractEvaluationChecks(cfg, cwd, &result)
-			}
+			appendVerifyContractChecks(cwd, &result)
 
 			if jsonOutput {
 				payload, err := result.RenderVerifyJSON()
@@ -60,4 +56,36 @@ func newVerifyCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit structured JSON results for CI or scripts")
 	return cmd
+}
+
+// CheckNameContractEvaluation is the stable verify check name used when
+// keyseal.yaml cannot be reloaded for contract evaluation after doctor.
+const CheckNameContractEvaluation = "contract evaluation"
+
+// appendVerifyContractChecks reloads config after doctor and evaluates
+// contracts when safe. A reload failure is reported as an explicit fail check
+// so verify never silently skips contract evaluation. Unmet
+// requirements.keyseal skips decrypt/eval because doctor already reported it.
+func appendVerifyContractChecks(cwd string, result *doctor.Result) {
+	cfg, loadErr := config.LoadLenient(filepath.Join(cwd, config.DefaultConfigPath))
+	if loadErr != nil {
+		result.Add(doctor.CheckResult{
+			Name:     CheckNameContractEvaluation,
+			Status:   doctor.StatusFail,
+			Severity: doctor.SeverityError,
+			Summary:  "Could not reload keyseal.yaml for contract evaluation",
+			Details: []string{
+				"Doctor completed, but verify could not reload configuration to evaluate secret contracts.",
+				"Contract values were not decrypted or evaluated.",
+			},
+			Remediation: []string{
+				"Fix keyseal.yaml so it loads cleanly, then rerun `keyseal verify`.",
+			},
+		})
+		return
+	}
+	if err := cfg.CheckKeysealRequirement(buildinfo.DisplayVersion()); err != nil {
+		return
+	}
+	appendContractEvaluationChecks(cfg, cwd, result)
 }

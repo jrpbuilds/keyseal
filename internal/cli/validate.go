@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jrpbuilds/keyseal/internal/buildinfo"
 	"github.com/jrpbuilds/keyseal/internal/config"
 	"github.com/jrpbuilds/keyseal/internal/contract"
 	"github.com/spf13/cobra"
@@ -50,6 +51,9 @@ func runValidate(cmd *cobra.Command, name string, jsonOutput bool) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return writeValidateFailure(cmd, jsonOutput, name, fmt.Sprintf("keyseal.yaml not found in %s; run `keyseal init` first", cwd))
 		}
+		return writeValidateFailure(cmd, jsonOutput, name, err.Error())
+	}
+	if err := cfg.CheckKeysealRequirement(buildinfo.DisplayVersion()); err != nil {
 		return writeValidateFailure(cmd, jsonOutput, name, err.Error())
 	}
 	for _, problem := range cfg.ContractProblems {

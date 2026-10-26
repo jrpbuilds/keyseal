@@ -117,10 +117,10 @@ make build
 - `keyseal rollback <logical-name> --to <commit>` restores one secret file from Git history
 - `keyseal render <logical-name...>` decrypts, merges, and renders secret values, skipping empty placeholder files
 - `keyseal exec <logical-name...> -- <command...>` runs a child process with merged env vars
-- `keyseal doctor` validates config sanity, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, contract definitions, and common mistakes
+- `keyseal doctor` validates config sanity, Keyseal binary compatibility, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, contract definitions, and common mistakes
 - `keyseal verify` runs strict CI checks, evaluates every declarative secret contract, and fails on any warning or failure
 - `keyseal validate <contract>` evaluates one named contract against decrypted values with optional `--json` output
-- `keyseal version` reports version, commit, and build date metadata
+- `keyseal version` reports version, commit, and build date metadata; `version --check` validates a constraint without loading the repo
 
 Detailed flags, examples, and behavior notes live in the [Command Reference](https://github.com/jrpbuilds/keyseal/wiki/Command-Reference) and [wiki](https://github.com/jrpbuilds/keyseal/wiki).
 
@@ -187,18 +187,25 @@ Key workflow details:
 - `verify` and `validate` decrypt referenced documents and evaluate contract rules, reporting key names and failed rules without printing values
 - a contract entry may set `from: path/to/file.yaml` (relative to `keyseal.yaml`) instead of an inline body
 - `render --profile --dry-run` decrypts and fully validates inputs (age key material required) but writes nothing and prints only the plan
+- `requirements.keyseal` in `keyseal.yaml` declares a Masterminds-style constraint (prefer `>=X.Y.Z`); config-backed commands fail closed before decrypting when the installed binary does not satisfy it
+- `help`, `--version`, `version`, and `version --check` remain available even when the repository requires a newer binary
 
 For exact command behavior and more examples, see the [Command Reference](https://github.com/jrpbuilds/keyseal/wiki/Command-Reference), [Configuration Reference](https://github.com/jrpbuilds/keyseal/wiki/Configuration-Reference), and [Troubleshooting](https://github.com/jrpbuilds/keyseal/wiki/Troubleshooting) wiki pages.
 
-## Version reporting
+## Version reporting and compatibility
 
 ```bash
 keyseal --version
 keyseal version
 keyseal version --short
+keyseal version --check ">=1.1.0"
 ```
 
 Release builds stamp version, commit, and build date metadata via Go linker flags. Local builds default to `dev`, `unknown`, and `unknown` unless you pass `VERSION`, `COMMIT`, and `DATE`. When Git metadata is available, local builds use the latest `v*` tag and the short current commit.
+
+Compatibility checks are local and need no network access. Unstamped values such as `dev` or `ci` fail closed when a requirement is present. Git-describe stamps like `v1.1.0-6-gfdac110` are treated as build metadata on `1.1.0` so they satisfy `>=1.1.0`. Prefer a simple `>=X.Y.Z` constraint in repositories. Checks trust the binary's stamped version string, so a forged stamp can bypass the gate; use release artifacts or package integrity when you need stronger assurance.
+
+Bootstrap CI, Ansible, or a deployment controller with `keyseal version --check` before loading repository config, then use `keyseal verify` as the gate after checkout. Fuller recipes live in the [Installation](https://github.com/jrpbuilds/keyseal/wiki/Installation) and [Command Reference](https://github.com/jrpbuilds/keyseal/wiki/Command-Reference) wiki pages.
 
 ## Release artifacts
 

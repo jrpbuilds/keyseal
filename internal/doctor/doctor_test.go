@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrpbuilds/keyseal/internal/buildinfo"
 	"github.com/jrpbuilds/keyseal/internal/doctor"
 )
 
@@ -94,6 +95,59 @@ func TestDoctorRunHappyPath(t *testing.T) {
 	ageCheck := findCheck(t, result, "age binary")
 	if ageCheck.Status != doctor.StatusOK {
 		t.Fatalf("expected age binary check to pass, got %#v", ageCheck)
+	}
+
+	versionCheck := findCheck(t, result, doctor.CheckNameKeysealVersion)
+	if versionCheck.Status != doctor.StatusOK {
+		t.Fatalf("expected keyseal version check to pass when unset, got %#v", versionCheck)
+	}
+	if !strings.Contains(versionCheck.Summary, "No requirements.keyseal set") {
+		t.Fatalf("unexpected keyseal version summary: %#v", versionCheck)
+	}
+}
+
+func TestDoctorKeysealVersionRequirement(t *testing.T) {
+	orig := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = orig })
+
+	dir := t.TempDir()
+	writeFakeSOPS(t, dir, "fake-sops", "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'sops 3.9.0'\n  exit 0\nfi\nexit 0\n")
+	writeFakeSOPS(t, dir, "age", "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'age 1.2.0'\n  exit 0\nfi\nexit 0\n")
+	writeDoctorConfigWithRequirement(t, dir, "fake-sops", "0600", ">=1.1.0")
+	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
+	writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
+
+	buildinfo.Version = "v0.2.0"
+	result, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !result.HasFailures() {
+		t.Fatal("expected unmet requirements.keyseal to fail doctor")
+	}
+	check := findCheck(t, result, doctor.CheckNameKeysealVersion)
+	if check.Status != doctor.StatusFail {
+		t.Fatalf("expected keyseal version fail, got %#v", check)
+	}
+	if !containsSubstring(check.Details, "v0.2.0") || !containsSubstring(check.Details, ">=1.1.0") {
+		t.Fatalf("expected running and required versions in details, got %#v", check.Details)
+	}
+	skip := findCheck(t, result, "secret discovery")
+	if skip.Status != doctor.StatusSkip {
+		t.Fatalf("expected secret discovery skip on version fail, got %#v", skip)
+	}
+
+	buildinfo.Version = "v1.1.0"
+	result, err = doctor.Run(dir)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	check = findCheck(t, result, doctor.CheckNameKeysealVersion)
+	if check.Status != doctor.StatusOK {
+		t.Fatalf("expected keyseal version ok when satisfied, got %#v", check)
+	}
+	if result.HasFailures() {
+		t.Fatalf("expected doctor to pass when requirement satisfied, got %#v", result.Checks)
 	}
 }
 
@@ -367,6 +421,11 @@ func TestDoctorFailsWhenAgeKeyIsWrong(t *testing.T) {
 	if !containsSubstring(check.Details, "Decrypt error") {
 		t.Fatalf("expected decrypt error detail, got %#v", check.Details)
 	}
+	if !containsSubstring(check.Details, "no matching age key could decrypt this file") &&
+		!containsSubstring(check.Details, "decryption failed") {
+		t.Fatalf("expected classified decrypt category, got %#v", check.Details)
+	}
+	assertNoRawDecryptLeak(t, check.Details)
 }
 
 func TestDoctorFailsWhenNoAgeKey(t *testing.T) {
@@ -401,10 +460,27 @@ func TestDoctorFailsWhenNoAgeKey(t *testing.T) {
 	if !containsSubstring(secretCheck.Details, "Decrypt error") {
 		t.Fatalf("expected Decrypt error in details, got %#v", secretCheck.Details)
 	}
+	if !containsSubstring(secretCheck.Details, "age key material is missing or unreadable") &&
+		!containsSubstring(secretCheck.Details, "no matching age key could decrypt this file") &&
+		!containsSubstring(secretCheck.Details, "decryption failed") {
+		t.Fatalf("expected classified decrypt category, got %#v", secretCheck.Details)
+	}
+	assertNoRawDecryptLeak(t, secretCheck.Details)
 	for _, detail := range secretCheck.Details {
 		for _, phrase := range []string{"install sops", "sops binary", "sops executable", "sops --decrypt"} {
 			if strings.Contains(detail, phrase) {
 				t.Fatalf("must not suggest sops binary installation: %q", detail)
+			}
+		}
+	}
+}
+
+func assertNoRawDecryptLeak(t *testing.T, details []string) {
+	t.Helper()
+	for _, detail := range details {
+		for _, leak := range []string{"AGE-SECRET-KEY-", "failed to get the data key", "Error getting data key", "MAC mismatch"} {
+			if strings.Contains(detail, leak) {
+				t.Fatalf("doctor details must not forward raw decrypt backend text %q: %q", leak, detail)
 			}
 		}
 	}
@@ -435,7 +511,17 @@ func writeDoctorConfig(t *testing.T, dir, binary, mode string) {
 	writeDoctorConfigWithAge(t, dir, binary, "age", mode)
 }
 
+func writeDoctorConfigWithRequirement(t *testing.T, dir, binary, mode, requirement string) {
+	t.Helper()
+	writeDoctorConfigWithAgeAndRequirement(t, dir, binary, "age", mode, requirement)
+}
+
 func writeDoctorConfigWithAge(t *testing.T, dir, binary, ageBinary, mode string) {
+	t.Helper()
+	writeDoctorConfigWithAgeAndRequirement(t, dir, binary, ageBinary, mode, "")
+}
+
+func writeDoctorConfigWithAgeAndRequirement(t *testing.T, dir, binary, ageBinary, mode, requirement string) {
 	t.Helper()
 	cfg := `version: 1
 repository:
@@ -455,6 +541,9 @@ profiles:
   default:
     renders: []
 `
+	if requirement != "" {
+		cfg += "requirements:\n  keyseal: \"" + requirement + "\"\n"
+	}
 	if err := os.WriteFile(filepath.Join(dir, "keyseal.yaml"), []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

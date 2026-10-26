@@ -4,6 +4,12 @@ All notable changes to Keyseal will be documented in this file.
 
 The format is intentionally lightweight and optimized for public release tags.
 
+## Unreleased
+
+- repositories can declare `requirements.keyseal` so an older installed Keyseal binary fails before decrypting or changing secrets
+- `keyseal version --check` lets CI, Ansible, and deployment controllers verify a constraint without loading `keyseal.yaml`
+- `keyseal doctor` and `keyseal verify` report a dedicated Keyseal binary compatibility check
+
 ## v1.2.0 (2026-10-19)
 
 Highlights:
