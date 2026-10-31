@@ -85,9 +85,10 @@ func MergeEnv(base []string, overrides map[string]string) []string {
 
 // Run executes the provided command with the merged environment.
 //
-// The parent environment is read here, after decrypt has finished, so any
-// temporary SOPS_AGE_KEY_FILE mutation during decrypt is not copied into the
-// child unless it remains set in the operator's shell.
+// The child environment is built from os.Environ() at spawn time; this is safe
+// because sopsutil.withAgeKeyFileEnv defer-restores any temporary
+// SOPS_AGE_KEY_FILE it sets during decrypt, so the environment here reflects
+// the operator's shell, not Keyseal's decrypt-time mutations.
 func Run(command []string, env map[string]string, opts Options) error {
 	if len(command) == 0 {
 		return fmt.Errorf("command is required")

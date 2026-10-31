@@ -23,8 +23,10 @@ func newExecCommand() *cobra.Command {
 			"By default the child inherits the current process environment and secret values override\n" +
 			"matching keys. Use --clean-env to start from an empty environment, and --keep-env to\n" +
 			"copy selected parent variables into that cleaned environment. Secret document values\n" +
-			"always take precedence over retained parent variables. Empty or whitespace-only\n" +
-			"placeholder files are skipped.",
+			"always take precedence over retained parent variables. Under --clean-env, prefer an\n" +
+			"absolute path for the child command, and pass --keep-env PATH when that child will\n" +
+			"launch further commands by name; lookup of the initial binary always uses the parent\n" +
+			"PATH. Empty or whitespace-only placeholder files are skipped.",
 		Example: "  keyseal exec production/platform/app -- env | grep APP_\n" +
 			"  keyseal exec production/platform/app --clean-env -- /usr/bin/env\n" +
 			"  keyseal exec production/platform/app --clean-env --keep-env PATH,HOME,LANG -- php artisan migrate\n" +
@@ -72,7 +74,7 @@ func newExecCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&cleanEnv, "clean-env", false, "Start the child from an empty environment instead of inheriting the parent")
-	cmd.Flags().StringSliceVar(&keepEnv, "keep-env", nil, "With --clean-env, copy these parent variables into the child (comma-separated or repeatable)")
+	cmd.Flags().StringSliceVar(&keepEnv, "keep-env", nil, "With --clean-env, copy these parent variables into the child (comma-separated or repeatable; names match exactly, including case)")
 	return cmd
 }
 
