@@ -111,25 +111,67 @@ func evaluateContract(cfg config.Config, cwd string, def contract.Definition) []
 }
 
 // appendContractEvaluationChecks evaluates every configured contract and
-// replaces doctor definition-OK contract checks with evaluation results so
-// verify reports one check per contract name.
-func appendContractEvaluationChecks(cfg config.Config, cwd string, result *doctor.Result) {
+// replaces doctor checks for names present in cfg.Contracts with evaluation
+// results so verify reports one check per contract name. Invalid-definition
+// fails from ContractProblems are kept. Document scope from opts is applied
+// so excluded contracts are not decrypted and mixed contracts fail closed.
+func appendContractEvaluationChecks(cfg config.Config, cwd string, opts doctor.Options, result *doctor.Result) {
 	if len(cfg.Contracts) == 0 {
 		return
 	}
 	kept := result.Checks[:0]
 	for _, check := range result.Checks {
-		if isContractDefinitionOK(check) {
+		if isReplaceableContractCheck(check, cfg) {
 			continue
 		}
 		kept = append(kept, check)
 	}
 	result.Checks = kept
 
+	identityUnavailable := result.HasUnavailable()
 	for _, name := range sortedContractNames(cfg) {
 		def := cfg.Contracts[name]
-		violations := evaluateContract(cfg, cwd, def)
 		checkName := fmt.Sprintf("contract %q", name)
+		scopeKind, err := doctor.ClassifyContractDocuments(def, opts, cfg)
+		if err != nil {
+			result.Add(doctor.CheckResult{
+				Name:     checkName,
+				Status:   doctor.StatusFail,
+				Severity: doctor.SeverityError,
+				Summary:  fmt.Sprintf("Contract %q could not be scoped for evaluation", name),
+				Details:  []string{err.Error()},
+				Remediation: []string{
+					"Fix the selected scope or access profile, then rerun `keyseal verify`.",
+				},
+			})
+			continue
+		}
+		switch scopeKind {
+		case doctor.ContractDocumentScopeExcluded:
+			result.Add(doctor.CheckResult{
+				Name:     checkName,
+				Status:   doctor.StatusExcluded,
+				Severity: doctor.SeverityInformational,
+				Summary:  "Contract documents are outside the selected scope",
+				Details: []string{
+					fmt.Sprintf("Documents: %s", strings.Join(def.Documents, ", ")),
+				},
+			})
+			continue
+		case doctor.ContractDocumentScopeMixed:
+			result.Add(doctor.MixedContractCheck(name, def))
+			continue
+		}
+		if identityUnavailable {
+			result.Add(doctor.CheckResult{
+				Name:     checkName,
+				Status:   doctor.StatusSkip,
+				Severity: doctor.SeverityInformational,
+				Summary:  "Skipped contract evaluation because the selected identity is unavailable",
+			})
+			continue
+		}
+		violations := evaluateContract(cfg, cwd, def)
 		if len(violations) == 0 {
 			result.Add(doctor.CheckResult{
 				Name:     checkName,
@@ -156,8 +198,19 @@ func appendContractEvaluationChecks(cfg config.Config, cwd string, result *docto
 	}
 }
 
-func isContractDefinitionOK(check doctor.CheckResult) bool {
-	return check.Status == doctor.StatusOK && strings.HasPrefix(check.Name, `contract "`)
+// isReplaceableContractCheck reports whether verify should drop a doctor check
+// before re-emitting contract evaluation results. Checks for names present in
+// cfg.Contracts are replaced (including Fail/Skip). Invalid-definition fails
+// for names that exist only in ContractProblems are kept.
+func isReplaceableContractCheck(check doctor.CheckResult, cfg config.Config) bool {
+	const prefix = `contract "`
+	const suffix = `"`
+	if !strings.HasPrefix(check.Name, prefix) || !strings.HasSuffix(check.Name, suffix) {
+		return false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(check.Name, prefix), suffix)
+	_, ok := cfg.Contracts[name]
+	return ok
 }
 
 func sortedContractNames(cfg config.Config) []string {

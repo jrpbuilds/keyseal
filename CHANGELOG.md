@@ -6,6 +6,9 @@ The format is intentionally lightweight and optimized for public release tags.
 
 ## Unreleased
 
+- `keyseal doctor` and `keyseal verify` can limit document checks with `--scope`, `--profile`, or `--identity-profile` so repositories with multiple recipient groups validate only the documents a role is meant to decrypt
+- documents outside the selected scope are reported as excluded instead of as decrypt failures
+- `access_profiles` in `keyseal.yaml` declare include/exclude globs and optional public age recipients for identity-aware checks, without private key material
 - repositories can declare `requirements.keyseal` so an older installed Keyseal binary fails before decrypting or changing secrets
 - `keyseal version --check` lets CI, Ansible, and deployment controllers verify a constraint without loading `keyseal.yaml`
 - `keyseal doctor` and `keyseal verify` report a dedicated Keyseal binary compatibility check

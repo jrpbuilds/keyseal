@@ -10,6 +10,7 @@ import (
 
 func newDoctorCommand() *cobra.Command {
 	var jsonOutput bool
+	var scope scopeFlags
 
 	cmd := &cobra.Command{
 		Use:   "doctor",
@@ -17,16 +18,20 @@ func newDoctorCommand() *cobra.Command {
 		Long: "Validate keyseal.yaml, SOPS availability, age availability warnings, .sops.yaml readiness, placeholder recipients,\n" +
 			"encrypted file consistency, plaintext mistakes, empty placeholder files, decrypted env document shape, and declarative\n" +
 			"contract definitions without exposing secret values. Contract value rules are evaluated by keyseal verify and keyseal validate.\n" +
+			"Optionally limit document checks with --scope, --profile, or --identity-profile.\n" +
 			"Use --json for machine-readable output in CI or scripts.",
 		Example: "  keyseal doctor\n" +
-			"  keyseal doctor --json",
+			"  keyseal doctor --json\n" +
+			"  keyseal doctor --scope production/**\n" +
+			"  keyseal doctor --profile app-server\n" +
+			"  keyseal doctor --identity-profile controller",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
 
-			result, err := doctor.Run(cwd)
+			result, err := doctor.Run(cwd, scope.options())
 			if err != nil {
 				return err
 			}
@@ -43,7 +48,7 @@ func newDoctorCommand() *cobra.Command {
 				fmt.Fprint(cmd.OutOrStdout(), result.RenderText())
 			}
 
-			if result.HasFailures() {
+			if result.DoctorFailed() {
 				return commandExitError{code: 1}
 			}
 			return nil
@@ -51,5 +56,6 @@ func newDoctorCommand() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit structured JSON results for CI or scripts")
+	bindScopeFlags(cmd, &scope)
 	return cmd
 }

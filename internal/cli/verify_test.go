@@ -249,7 +249,7 @@ func TestAppendVerifyContractChecksFailsWhenConfigMissing(t *testing.T) {
 		Summary:  "synthetic prior doctor success",
 	})
 
-	appendVerifyContractChecks(dir, &result)
+	appendVerifyContractChecks(dir, doctor.Options{}, &result)
 
 	found := false
 	for _, check := range result.Checks {

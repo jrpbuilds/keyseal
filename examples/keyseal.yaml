@@ -31,6 +31,21 @@ profiles:
   default:
     renders: []
 
+# Optional access profiles for scoped doctor/verify runs. These are separate
+# from render profiles above. Recipients are public age keys only.
+# access_profiles:
+#   app-server:
+#     include:
+#       - production/app
+#       - production/monitoring
+#     exclude:
+#       - controller/**
+#   controller:
+#     include:
+#       - controller/**
+#     recipients:
+#       - age1controllerpublickey
+
 # Optional declarative contracts. doctor checks definitions; verify and
 # validate evaluate decrypted values without printing them.
 contracts:

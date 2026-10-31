@@ -76,7 +76,7 @@ func TestDoctorRunHappyPath(t *testing.T) {
 	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
 	writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestDoctorKeysealVersionRequirement(t *testing.T) {
 	writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
 
 	buildinfo.Version = "v0.2.0"
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestDoctorKeysealVersionRequirement(t *testing.T) {
 	}
 
 	buildinfo.Version = "v1.1.0"
-	result, err = doctor.Run(dir)
+	result, err = doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestDoctorKeysealVersionRequirement(t *testing.T) {
 func TestDoctorFailsWhenKeysealConfigMissing(t *testing.T) {
 	dir := t.TempDir()
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestDoctorFailsWhenKeysealConfigInvalid(t *testing.T) {
 	}
 	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestDoctorFailsWhenSOPSConfigMissing(t *testing.T) {
 	dir := t.TempDir()
 	writeDoctorConfig(t, dir, "missing-sops", "0600")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestDoctorReportsSOPSBinaryBeforeSOPSConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeDoctorConfig(t, dir, "missing-sops", "0600")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestDoctorReportsAgeBinaryMissingAsInformational(t *testing.T) {
 	writeDoctorConfigWithAge(t, dir, "fake-sops", "missing-age", "0600")
 	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestDoctorDetectsPlaceholderRecipients(t *testing.T) {
 	writeDoctorConfig(t, dir, "missing-sops", "0600")
 	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1REPLACE_ME,age1RECOVERY_REPLACE_ME\n")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestDoctorFlagsPlaintextStarterFiles(t *testing.T) {
 		t.Fatalf("write secret: %v", err)
 	}
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestDoctorWarnsOnEmptyPlaceholderSecretFiles(t *testing.T) {
 		t.Fatalf("write secret: %v", err)
 	}
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestDoctorWarnsOnWhitespaceOnlyPlaceholderSecretFiles(t *testing.T) {
 		t.Fatalf("write secret: %v", err)
 	}
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestDoctorDecryptsWithLibraryWhenSOPSMissing(t *testing.T) {
 	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
 	writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestDoctorReportsSOPSDecryptWarnings(t *testing.T) {
 		t.Fatalf("rewrite encrypted secret with comment: %v", err)
 	}
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestDoctorWarnsOnUnsafeFileMode(t *testing.T) {
 	writeDoctorConfig(t, dir, "missing-sops", "0644")
 	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestDoctorFailsWhenAgeKeyIsWrong(t *testing.T) {
 	writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
 	writeEncryptedSecretWithKey(t, dir, "production/platform/app.enc.yaml", doctorWrongAgeKey)
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestDoctorFailsWhenNoAgeKey(t *testing.T) {
 
 	clearAgeKeyDoctorEnv(t)
 
-	result, err := doctor.Run(dir)
+	result, err := doctor.Run(dir, doctor.Options{})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}

@@ -14,27 +14,33 @@ import (
 // newVerifyCommand wires strict CI verification to the shared doctor engine.
 func newVerifyCommand() *cobra.Command {
 	var jsonOutput bool
+	var scope scopeFlags
 
 	cmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Run strict CI verification checks",
 		Long: "Run the same non-mutating repository checks as doctor, but fail when any warning or failure is reported.\n" +
 			"Also evaluates every declarative secret contract against decrypted values.\n" +
-			"Use this in CI and release gates to ensure every encrypted file decrypts and validates cleanly.",
+			"Optionally limit document checks with --scope, --profile, or --identity-profile.\n" +
+			"Use this in CI and release gates to ensure every in-scope encrypted file decrypts and validates cleanly.",
 		Example: "  keyseal verify\n" +
-			"  keyseal verify --json",
+			"  keyseal verify --json\n" +
+			"  keyseal verify --scope production/**\n" +
+			"  keyseal verify --profile app-server\n" +
+			"  keyseal verify --identity-profile controller",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
 
-			result, err := doctor.Run(cwd)
+			opts := scope.options()
+			result, err := doctor.Run(cwd, opts)
 			if err != nil {
 				return err
 			}
 
-			appendVerifyContractChecks(cwd, &result)
+			appendVerifyContractChecks(cwd, opts, &result)
 
 			if jsonOutput {
 				payload, err := result.RenderVerifyJSON()
@@ -55,6 +61,7 @@ func newVerifyCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit structured JSON results for CI or scripts")
+	bindScopeFlags(cmd, &scope)
 	return cmd
 }
 
@@ -66,7 +73,7 @@ const CheckNameContractEvaluation = "contract evaluation"
 // contracts when safe. A reload failure is reported as an explicit fail check
 // so verify never silently skips contract evaluation. Unmet
 // requirements.keyseal skips decrypt/eval because doctor already reported it.
-func appendVerifyContractChecks(cwd string, result *doctor.Result) {
+func appendVerifyContractChecks(cwd string, opts doctor.Options, result *doctor.Result) {
 	cfg, loadErr := config.LoadLenient(filepath.Join(cwd, config.DefaultConfigPath))
 	if loadErr != nil {
 		result.Add(doctor.CheckResult{
@@ -87,5 +94,5 @@ func appendVerifyContractChecks(cwd string, result *doctor.Result) {
 	if err := cfg.CheckKeysealRequirement(buildinfo.DisplayVersion()); err != nil {
 		return
 	}
-	appendContractEvaluationChecks(cfg, cwd, result)
+	appendContractEvaluationChecks(cfg, cwd, opts, result)
 }

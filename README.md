@@ -117,8 +117,8 @@ make build
 - `keyseal rollback <logical-name> --to <commit>` restores one secret file from Git history
 - `keyseal render <logical-name...>` decrypts, merges, and renders secret values, skipping empty placeholder files
 - `keyseal exec <logical-name...> -- <command...>` runs a child process with merged env vars
-- `keyseal doctor` validates config sanity, Keyseal binary compatibility, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, contract definitions, and common mistakes
-- `keyseal verify` runs strict CI checks, evaluates every declarative secret contract, and fails on any warning or failure
+- `keyseal doctor` validates config sanity, Keyseal binary compatibility, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, contract definitions, and common mistakes; `--scope`, `--profile`, and `--identity-profile` limit checks to one role or path set
+- `keyseal verify` runs strict CI checks, evaluates every declarative secret contract, and fails on any warning or failure, with the same scoping flags as doctor
 - `keyseal validate <contract>` evaluates one named contract against decrypted values with optional `--json` output
 - `keyseal version` reports version, commit, and build date metadata; `version --check` validates a constraint without loading the repo
 
@@ -155,7 +155,11 @@ keyseal render --profile production --dry-run
 keyseal exec production/platform/app -- php artisan migrate
 keyseal rollback production/platform/app --to <commit> --dry-run
 keyseal doctor
+keyseal doctor --scope production/**
+keyseal doctor --profile app-server
+keyseal doctor --identity-profile controller
 keyseal verify
+keyseal verify --profile app-server
 keyseal validate production-app --json
 ```
 
@@ -184,6 +188,8 @@ Key workflow details:
 - `contracts` in `keyseal.yaml` declare generic secret requirements (required/forbidden keys, length/regex/non-empty rules, equality, and conditionals); bare keys use last-wins merge across listed documents
 - `required` means the key is present (empty string is allowed); use `non_empty` when whitespace-only values must fail
 - `doctor` checks that contract definitions are well-formed and that listed documents exist; it does not evaluate secret values
+- `access_profiles` in `keyseal.yaml` describe which logical documents a role should validate; they are separate from render `profiles`, and must never contain private age keys
+- scoped `doctor`/`verify` runs report documents outside the selected role as excluded instead of as decrypt failures, so intentional recipient separation does not fail the other role
 - `verify` and `validate` decrypt referenced documents and evaluate contract rules, reporting key names and failed rules without printing values
 - a contract entry may set `from: path/to/file.yaml` (relative to `keyseal.yaml`) instead of an inline body
 - `render --profile --dry-run` decrypts and fully validates inputs (age key material required) but writes nothing and prints only the plan

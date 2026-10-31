@@ -56,6 +56,14 @@ type Config struct {
 	// ContractProblems holds per-contract definition or from-file failures.
 	// Load fails when any exist; LoadLenient keeps them for doctor reporting.
 	ContractProblems []contract.Problem `yaml:"-"`
+
+	// AccessProfiles are decoded strictly from the access_profiles YAML node
+	// and are not populated by the lax top-level unmarshal. yaml:"-" keeps
+	// that pin intact. No default profile is injected.
+	AccessProfiles map[string]AccessProfile `yaml:"-"`
+	// AccessProfileProblems holds per-profile definition failures. Load fails
+	// when any exist; LoadLenient keeps them for doctor reporting.
+	AccessProfileProblems []AccessProfileProblem `yaml:"-"`
 }
 
 // RequirementsConfig declares tooling compatibility constraints for this repo.
@@ -141,7 +149,8 @@ func Default() Config {
 		Profiles: map[string]Profile{
 			"default": {Renders: []RenderProfile{}},
 		},
-		Contracts: map[string]contract.Definition{},
+		Contracts:      map[string]contract.Definition{},
+		AccessProfiles: map[string]AccessProfile{},
 	}
 }
 
@@ -215,6 +224,16 @@ func load(path string) (Config, error) {
 	if cfg.Contracts == nil {
 		cfg.Contracts = map[string]contract.Definition{}
 	}
+
+	accessProfiles, accessProblems, err := LoadAccessProfilesFromConfigYAML(data)
+	if err != nil {
+		return Config{}, fmt.Errorf("access_profiles: %w", err)
+	}
+	cfg.AccessProfiles = accessProfiles
+	cfg.AccessProfileProblems = accessProblems
+	if cfg.AccessProfiles == nil {
+		cfg.AccessProfiles = map[string]AccessProfile{}
+	}
 	return cfg, nil
 }
 
@@ -260,11 +279,14 @@ func (c *Config) applyDefaults() {
 	if c.Contracts == nil {
 		c.Contracts = def.Contracts
 	}
+	if c.AccessProfiles == nil {
+		c.AccessProfiles = def.AccessProfiles
+	}
 }
 
 // Validate checks the semantic constraints of a loaded config file, including
 // requirements.keyseal against the running Keyseal binary, every profile
-// render definition, and every secret contract definition.
+// render definition, access profiles, and every secret contract definition.
 //
 // The binary gate runs after validateBase and before profiles/contracts so an
 // unmet version requirement is not masked by later structural errors.
@@ -279,6 +301,9 @@ func (c Config) Validate() error {
 	if err := c.ValidateProfiles(); err != nil {
 		return err
 	}
+	if err := c.ValidateAccessProfiles(); err != nil {
+		return err
+	}
 	return c.ValidateContracts()
 }
 
@@ -286,6 +311,12 @@ func (c Config) Validate() error {
 // problem discovered during strict decode.
 func (c Config) ValidateContracts() error {
 	return contract.FirstProblem(c.ContractProblems)
+}
+
+// ValidateAccessProfiles fails fast on the first access_profiles definition
+// problem discovered during strict decode.
+func (c Config) ValidateAccessProfiles() error {
+	return FirstAccessProfileProblem(c.AccessProfileProblems)
 }
 
 // validateBase checks the non-profile semantic constraints of a loaded config.

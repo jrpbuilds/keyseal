@@ -25,23 +25,29 @@ import (
 const CheckNameKeysealVersion = "keyseal version"
 
 // Run executes the doctor checks for the current repository.
-func Run(cwd string) (Result, error) {
+// The zero-value Options selects full-repository mode.
+func Run(cwd string, opts Options) (Result, error) {
 	var result Result
+	result.Scope = ScopeInfo{Mode: ScopeModeFull}
 
 	cfg, cfgOK := runConfigChecks(cwd, &result)
-	if cfgOK {
-		// Tool checks depend on keyseal.yaml values. Missing sops/age binaries
-		// are informational for read-only hosts, but surfacing them early keeps
-		// mutating-command setup problems easy to find.
-		configCheck := result.Checks[0]
-		result.Checks = result.Checks[:0]
-		runSOPSBinaryChecks(cfg, cwd, &result)
-		runAgeBinaryChecks(cfg, &result)
-		result.Add(configCheck)
-		runKeysealVersionCheck(cfg, &result)
+	if !cfgOK {
+		result.Scope = requestedScopeInfo(opts)
 		runSOPSConfigChecks(cwd, &result)
-	} else {
-		runSOPSConfigChecks(cwd, &result)
+		if opts.Profile != "" || opts.IdentityProfile != "" {
+			result.Add(CheckResult{
+				Name:     checkNameScopeSelection,
+				Status:   StatusFail,
+				Severity: SeverityError,
+				Summary:  "Access profile was not applied because keyseal.yaml could not be loaded",
+				Details: []string{
+					"Document scoping requires a parseable keyseal.yaml with access_profiles.",
+				},
+				Remediation: []string{
+					"Create or fix keyseal.yaml, then rerun `keyseal doctor`.",
+				},
+			})
+		}
 		result.Add(CheckResult{
 			Name:     "secret validation",
 			Status:   StatusSkip,
@@ -54,13 +60,32 @@ func Run(cwd string) (Result, error) {
 		return result, nil
 	}
 
+	// Tool checks depend on keyseal.yaml values. Missing sops/age binaries
+	// are informational for read-only hosts, but surfacing them early keeps
+	// mutating-command setup problems easy to find.
+	configCheck := result.Checks[0]
+	result.Checks = result.Checks[:0]
+	runSOPSBinaryChecks(cfg, cwd, &result)
+	runAgeBinaryChecks(cfg, &result)
+	result.Add(configCheck)
+	runKeysealVersionCheck(cfg, &result)
+	runSOPSConfigChecks(cwd, &result)
+	runAccessProfileDefinitionChecks(cfg, &result)
+
+	filter, selectionFail := resolveDocumentFilter(opts, cfg)
+	result.Scope = filter.info
+	if selectionFail != nil {
+		result.Add(*selectionFail)
+		return result, nil
+	}
+
 	versionOK := !hasFailedCheck(result, CheckNameKeysealVersion)
 
 	repoRoot := cfg.RepoRoot(cwd)
 	repoRootReady := runRepositoryRootCheck(repoRoot, &result)
 	runOutputPathChecks(cfg, &result)
 	runProfileChecks(cfg, cwd, &result)
-	runContractDefinitionChecks(cfg, cwd, &result)
+	runContractDefinitionChecks(cfg, cwd, filter, &result)
 	runRepoArtifactChecks(repoRoot, &result)
 
 	if !versionOK {
@@ -89,10 +114,40 @@ func Run(cwd string) (Result, error) {
 		return result, nil
 	}
 
-	if err := runSecretChecks(cwd, repoRoot, cfg, &result); err != nil {
+	identityOK := true
+	if filter.info.Mode == ScopeModeIdentity {
+		availability := checkIdentityAvailability(cwd, cfg, filter.info.Profile)
+		result.Add(availability.check)
+		identityOK = availability.available
+	}
+
+	if err := runSecretChecks(cwd, repoRoot, cfg, filter, identityOK, &result); err != nil {
 		return result, fmt.Errorf("run secret checks: %w", err)
 	}
 	return result, nil
+}
+
+// runAccessProfileDefinitionChecks reports access_profiles decode problems as
+// discrete doctor checks. LoadLenient keeps those problems for this path.
+func runAccessProfileDefinitionChecks(cfg config.Config, result *Result) {
+	for _, problem := range cfg.AccessProfileProblems {
+		checkName := "access_profiles"
+		if problem.Name != "" {
+			checkName = fmt.Sprintf("access_profiles.%s", problem.Name)
+		}
+		result.Add(CheckResult{
+			Name:     checkName,
+			Status:   StatusFail,
+			Severity: SeverityError,
+			Summary:  "access_profiles definition is invalid",
+			Details: []string{
+				problem.Message,
+			},
+			Remediation: []string{
+				"Fix access_profiles in keyseal.yaml. Public age recipients only; never store private keys there.",
+			},
+		})
+	}
 }
 
 func hasFailedCheck(result Result, name string) bool {
@@ -471,8 +526,10 @@ func runProfileChecks(cfg config.Config, cwd string, result *Result) {
 
 // runContractDefinitionChecks reports malformed contract definitions and
 // missing document files as discrete checks. It never decrypts secrets or
-// evaluates contract rules against values.
-func runContractDefinitionChecks(cfg config.Config, cwd string, result *Result) {
+// evaluates contract rules against values. Document existence follows the
+// active document filter: excluded contracts are skipped, mixed-scope
+// contracts fail closed, and only in-scope documents are existence-checked.
+func runContractDefinitionChecks(cfg config.Config, cwd string, filter documentFilter, result *Result) {
 	for _, problem := range cfg.ContractProblems {
 		name := problem.Name
 		if name == "" {
@@ -495,7 +552,40 @@ func runContractDefinitionChecks(cfg config.Config, cwd string, result *Result) 
 	repoRoot := cfg.RepoRoot(cwd)
 	for _, name := range slices.Sorted(maps.Keys(cfg.Contracts)) {
 		def := cfg.Contracts[name]
-		existence := contract.DocumentExistenceProblems(def, repoRoot, cfg.Repository.EncryptedExtension)
+		scopeKind, checkedDocs, err := classifyContractDocuments(def, filter)
+		if err != nil {
+			result.Add(CheckResult{
+				Name:     fmt.Sprintf("contract %q", name),
+				Status:   StatusFail,
+				Severity: SeverityError,
+				Summary:  fmt.Sprintf("Contract %q could not be scoped", name),
+				Details:  []string{err.Error()},
+				Remediation: []string{
+					"Fix access profile patterns or contract document names, then rerun `keyseal doctor`.",
+				},
+			})
+			continue
+		}
+		switch scopeKind {
+		case ContractDocumentScopeExcluded:
+			result.Add(CheckResult{
+				Name:     fmt.Sprintf("contract %q", name),
+				Status:   StatusExcluded,
+				Severity: SeverityInformational,
+				Summary:  "Contract documents are outside the selected scope",
+				Details: []string{
+					fmt.Sprintf("Documents: %s", strings.Join(def.Documents, ", ")),
+				},
+			})
+			continue
+		case ContractDocumentScopeMixed:
+			result.Add(MixedContractCheck(name, def))
+			continue
+		}
+
+		scopedDef := def
+		scopedDef.Documents = checkedDocs
+		existence := contract.DocumentExistenceProblems(scopedDef, repoRoot, cfg.Repository.EncryptedExtension)
 		if len(existence) > 0 {
 			details := make([]string, 0, len(existence))
 			for _, problem := range existence {
@@ -519,7 +609,7 @@ func runContractDefinitionChecks(cfg config.Config, cwd string, result *Result) 
 			Severity: SeverityInformational,
 			Summary:  "Contract definition is well-formed and its documents exist",
 			Details: []string{
-				fmt.Sprintf("Documents: %s", strings.Join(def.Documents, ", ")),
+				fmt.Sprintf("Documents: %s", strings.Join(checkedDocs, ", ")),
 			},
 		})
 	}
@@ -782,7 +872,10 @@ func runRepoArtifactChecks(repoRoot string, result *Result) {
 	})
 }
 
-func runSecretChecks(cwd, repoRoot string, cfg config.Config, result *Result) error {
+// runSecretChecks discovers encrypted files, applies the document filter, and
+// validates included documents. Excluded files are reported without being
+// opened. When identityOK is false, included decrypt checks are skipped.
+func runSecretChecks(cwd, repoRoot string, cfg config.Config, filter documentFilter, identityOK bool, result *Result) error {
 	files, err := repo.DiscoverEncryptedFiles(repoRoot, cfg.Repository.EncryptedExtension)
 	if err != nil {
 		return err
@@ -801,20 +894,20 @@ func runSecretChecks(cwd, repoRoot string, cfg config.Config, result *Result) er
 		return nil
 	}
 
-	result.Add(CheckResult{
-		Name:     "secret discovery",
-		Status:   StatusOK,
-		Severity: SeverityInformational,
-		Summary:  fmt.Sprintf("Discovered %d encrypted secret file(s)", len(files)),
-	})
-
-	opts := schema.DefaultValidationOptions()
-	opts.RequireValues = cfg.Validation.RequireValues
-	opts.KeyPattern = cfg.Validation.KeyPattern
+	type discovered struct {
+		path    string
+		logical string
+		include bool
+	}
+	discoveredFiles := make([]discovered, 0, len(files))
+	includedCount := 0
+	excludedCount := 0
+	namingFailures := 0
 
 	for _, file := range files {
 		logical, err := repo.PathToLogicalName(repoRoot, file, cfg.Repository.EncryptedExtension)
 		if err != nil {
+			namingFailures++
 			result.Add(CheckResult{
 				Name:     "secret naming",
 				Status:   StatusFail,
@@ -829,6 +922,107 @@ func runSecretChecks(cwd, repoRoot string, cfg config.Config, result *Result) er
 			})
 			continue
 		}
+
+		include := true
+		if filter.active {
+			ok, matchErr := filter.includes(logical)
+			if matchErr != nil {
+				result.Add(CheckResult{
+					Name:     checkNameScopeSelection,
+					Status:   StatusFail,
+					Severity: SeverityError,
+					Summary:  "Document scope could not be evaluated",
+					Details:  []string{matchErr.Error()},
+					Remediation: []string{
+						"Fix access profile include/exclude patterns, then rerun `keyseal doctor`.",
+					},
+				})
+				return nil
+			}
+			include = ok
+		}
+		if include {
+			includedCount++
+		} else {
+			excludedCount++
+		}
+		discoveredFiles = append(discoveredFiles, discovered{
+			path:    file,
+			logical: logical,
+			include: include,
+		})
+	}
+
+	if filter.active {
+		result.Add(CheckResult{
+			Name:     "secret discovery",
+			Status:   StatusOK,
+			Severity: SeverityInformational,
+			Summary: fmt.Sprintf(
+				"Discovered %d encrypted secret file(s); %d included, %d excluded by scope",
+				len(files), includedCount, excludedCount,
+			),
+		})
+		if includedCount == 0 && namingFailures == 0 {
+			result.Add(CheckResult{
+				Name:     checkNameScopeSelection,
+				Status:   StatusFail,
+				Severity: SeverityError,
+				Summary:  "Selected scope matches no encrypted documents",
+				Details: []string{
+					fmt.Sprintf("Discovered %d encrypted file(s), but none matched the active selector.", len(files)),
+				},
+				Remediation: []string{
+					"Adjust --scope patterns or the access profile include/exclude lists.",
+				},
+			})
+			for _, item := range discoveredFiles {
+				result.Add(excludedSecretCheck(item.logical))
+			}
+			return nil
+		}
+	} else {
+		result.Add(CheckResult{
+			Name:     "secret discovery",
+			Status:   StatusOK,
+			Severity: SeverityInformational,
+			Summary:  fmt.Sprintf("Discovered %d encrypted secret file(s)", len(files)),
+		})
+	}
+
+	if filter.active && !identityOK {
+		skipped := make([]string, 0, includedCount)
+		for _, item := range discoveredFiles {
+			if item.include {
+				skipped = append(skipped, item.logical)
+				continue
+			}
+			result.Add(excludedSecretCheck(item.logical))
+		}
+		result.Add(CheckResult{
+			Name:     "secret validation",
+			Status:   StatusSkip,
+			Severity: SeverityInformational,
+			Summary:  "Skipped decrypt validation because the selected identity is unavailable",
+			Details: []string{
+				fmt.Sprintf("Included documents: %s", strings.Join(skipped, ", ")),
+			},
+		})
+		return nil
+	}
+
+	opts := schema.DefaultValidationOptions()
+	opts.RequireValues = cfg.Validation.RequireValues
+	opts.KeyPattern = cfg.Validation.KeyPattern
+
+	for _, item := range discoveredFiles {
+		file := item.path
+		logical := item.logical
+		if !item.include {
+			result.Add(excludedSecretCheck(logical))
+			continue
+		}
+
 		roundTrip, err := repo.LogicalNameToPath(repoRoot, logical, cfg.Repository.EncryptedExtension)
 		if err != nil || roundTrip != file {
 			result.Add(CheckResult{
@@ -986,6 +1180,15 @@ func runSecretChecks(cwd, repoRoot string, cfg config.Config, result *Result) er
 	}
 
 	return nil
+}
+
+func excludedSecretCheck(logical string) CheckResult {
+	return CheckResult{
+		Name:     fmt.Sprintf("secret %s", logical),
+		Status:   StatusExcluded,
+		Severity: SeverityInformational,
+		Summary:  "Intentionally skipped by the selected document scope",
+	}
 }
 
 // classifyDecryptError maps decrypt failures to stable, non-secret categories.

@@ -49,7 +49,7 @@ func TestDoctorProfileChecks(t *testing.T) {
         mode: "999"
 `)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -81,7 +81,7 @@ func TestDoctorProfileChecks(t *testing.T) {
         out: /run/secrets/./a/app.env
 `)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -104,7 +104,7 @@ func TestDoctorProfileChecks(t *testing.T) {
         out: /run/secrets/app.env
 `)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -127,7 +127,7 @@ func TestDoctorProfileChecks(t *testing.T) {
         out: /run/secrets/broken.env
 `)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -149,7 +149,7 @@ func TestDoctorProfileChecks(t *testing.T) {
         out: /run/secrets/noinputs.env
 `)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -172,7 +172,7 @@ func TestDoctorProfileChecks(t *testing.T) {
         out: ""
 `)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -199,7 +199,7 @@ func TestDoctorProfileChecks(t *testing.T) {
 		writeSOPSConfig(t, dir, "creation_rules:\n  - path_regex: production/.*\\.enc\\.yaml$\n    age: age1realrecipient\n")
 		writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}

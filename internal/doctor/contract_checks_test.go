@@ -45,7 +45,7 @@ func TestDoctorContractDefinitionChecks(t *testing.T) {
 		writeValidSOPSConfigForDoctor(t, dir)
 		writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -66,7 +66,7 @@ func TestDoctorContractDefinitionChecks(t *testing.T) {
 		writeValidSOPSConfigForDoctor(t, dir)
 		writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -86,7 +86,7 @@ func TestDoctorContractDefinitionChecks(t *testing.T) {
 `)
 		writeValidSOPSConfigForDoctor(t, dir)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -106,7 +106,7 @@ func TestDoctorContractDefinitionChecks(t *testing.T) {
 `)
 		writeValidSOPSConfigForDoctor(t, dir)
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -130,7 +130,7 @@ func TestDoctorContractDefinitionChecks(t *testing.T) {
 		if err := os.WriteFile(secretPath, []byte("version: 1\nkind: env\nvalues:\n  TOKEN: "+marker+"\n"), 0o600); err != nil {
 			t.Fatalf("write plaintext: %v", err)
 		}
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
@@ -154,7 +154,7 @@ func TestDoctorContractDefinitionChecks(t *testing.T) {
 		keyPath := writeEncryptedSecret(t, dir, "production/platform/app.enc.yaml")
 		_ = keyPath
 
-		result, err := doctor.Run(dir)
+		result, err := doctor.Run(dir, doctor.Options{})
 		if err != nil {
 			t.Fatalf("Run returned error: %v", err)
 		}
