@@ -8,11 +8,11 @@ import (
 
 func TestMatchLogicalGlob(t *testing.T) {
 	tests := []struct {
-		name     string
-		logical  string
-		pattern  string
-		want     bool
-		wantErr  bool
+		name    string
+		logical string
+		pattern string
+		want    bool
+		wantErr bool
 	}{
 		{name: "exact match", logical: "production/app", pattern: "production/app", want: true},
 		{name: "exact miss", logical: "production/app", pattern: "production/other", want: false},
