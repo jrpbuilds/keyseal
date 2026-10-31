@@ -6,6 +6,9 @@ The format is intentionally lightweight and optimized for public release tags.
 
 ## Unreleased
 
+- `keyseal exec --clean-env` runs the child from an empty environment so unrelated shell credentials are not inherited
+- `--keep-env` with `--clean-env` copies only the named parent variables into that cleaned environment; secret document values still win on conflicts
+- Keyseal now builds with Go 1.27.3
 - `keyseal doctor` and `keyseal verify` can limit document checks with `--scope`, `--profile`, or `--identity-profile` so repositories with multiple recipient groups validate only the documents a role is meant to decrypt
 - documents outside the selected scope are reported as excluded instead of as decrypt failures
 - `access_profiles` in `keyseal.yaml` declare include/exclude globs and optional public age recipients for identity-aware checks, without private key material

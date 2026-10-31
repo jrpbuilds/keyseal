@@ -116,7 +116,7 @@ make build
 - `keyseal commit` stages current Keyseal-managed changes and creates a Git commit
 - `keyseal rollback <logical-name> --to <commit>` restores one secret file from Git history
 - `keyseal render <logical-name...>` decrypts, merges, and renders secret values, skipping empty placeholder files
-- `keyseal exec <logical-name...> -- <command...>` runs a child process with merged env vars
+- `keyseal exec <logical-name...> -- <command...>` runs a child process with merged env vars; `--clean-env` and `--keep-env` control parent environment inheritance
 - `keyseal doctor` validates config sanity, Keyseal binary compatibility, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, contract definitions, and common mistakes; `--scope`, `--profile`, and `--identity-profile` limit checks to one role or path set
 - `keyseal verify` runs strict CI checks, evaluates every declarative secret contract, and fails on any warning or failure, with the same scoping flags as doctor
 - `keyseal validate <contract>` evaluates one named contract against decrypted values with optional `--json` output
@@ -153,6 +153,7 @@ keyseal render production/platform/app --stdout --format json
 keyseal render --profile production
 keyseal render --profile production --dry-run
 keyseal exec production/platform/app -- php artisan migrate
+keyseal exec production/platform/app --clean-env --keep-env PATH,HOME,LANG -- php artisan migrate
 keyseal rollback production/platform/app --to <commit> --dry-run
 keyseal doctor
 keyseal doctor --scope production/**
