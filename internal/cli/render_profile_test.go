@@ -295,6 +295,71 @@ func TestRenderProfileDryRunStillSurfacesInputErrors(t *testing.T) {
 	}
 }
 
+// TestRenderProfileLoadExitCodes verifies profile renders map decrypt and
+// invalid-document failures to the same stable exit codes as explicit render.
+func TestRenderProfileLoadExitCodes(t *testing.T) {
+	t.Run("decrypt failure exits 3", func(t *testing.T) {
+		repoRoot := seedRenderProfileRepo(t, `  prod:
+    renders:
+      - name: app
+        inputs:
+          - production/platform/app
+        out: out/app.env
+`)
+		wrongKeyPath := filepath.Join(repoRoot, "wrong-age.key")
+		if err := os.WriteFile(wrongKeyPath, []byte(cliSecondAgeKey), 0o600); err != nil {
+			t.Fatalf("write wrong age key: %v", err)
+		}
+		t.Setenv("SOPS_AGE_KEY_FILE", wrongKeyPath)
+
+		_, err := runRootCommand(t, repoRoot, "render", "--profile", "prod")
+		if err == nil {
+			t.Fatal("expected decrypt failure")
+		}
+		if exitCodeOf(t, err) != 3 {
+			t.Fatalf("expected exit code 3, got %d (%v)", exitCodeOf(t, err), err)
+		}
+		if !strings.Contains(err.Error(), `profiles.prod.renders[0] ("app")`) {
+			t.Fatalf("expected profile label in error, got %q", err.Error())
+		}
+		if _, statErr := os.Stat(filepath.Join(repoRoot, "out", "app.env")); !os.IsNotExist(statErr) {
+			t.Fatal("expected no output file after decrypt failure")
+		}
+	})
+
+	t.Run("invalid document exits 4", func(t *testing.T) {
+		realSOPSPath(t)
+		repoRoot := t.TempDir()
+		writeTestConfig(t, repoRoot)
+		configureLibraryDecryptFixture(t, repoRoot)
+		writeProfilesKeysealConfig(t, repoRoot, `  prod:
+    renders:
+      - name: bad
+        inputs:
+          - production/platform/bad
+        out: out/bad.env
+`)
+		putEncryptedInvalidKind(t, repoRoot, "production/platform/bad", "ksl-profile-invalid-kind")
+
+		_, err := runRootCommand(t, repoRoot, "render", "--profile", "prod")
+		if err == nil {
+			t.Fatal("expected invalid document failure")
+		}
+		if exitCodeOf(t, err) != 4 {
+			t.Fatalf("expected exit code 4, got %d (%v)", exitCodeOf(t, err), err)
+		}
+		if !strings.Contains(err.Error(), `profiles.prod.renders[0] ("bad")`) {
+			t.Fatalf("expected profile label in error, got %q", err.Error())
+		}
+		if strings.Contains(err.Error(), "ksl-profile-invalid-kind") {
+			t.Fatalf("invalid-document error leaked sentinel value: %v", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(repoRoot, "out", "bad.env")); !os.IsNotExist(statErr) {
+			t.Fatal("expected no output file after invalid document failure")
+		}
+	})
+}
+
 // TestRenderProfileFlagConflicts verifies the --profile path rejects
 // conflicting flags and args before any work, and that --dry-run without
 // --profile is rejected.
@@ -328,6 +393,16 @@ func TestRenderProfileFlagConflicts(t *testing.T) {
 			name:    "mode with profile",
 			args:    []string{"render", "--profile", "prod", "--mode", "0600"},
 			wantErr: "--mode cannot be combined with --profile",
+		},
+		{
+			name:    "select with profile",
+			args:    []string{"render", "--profile", "prod", "--select", "APP_ENV"},
+			wantErr: "--select cannot be combined with --profile",
+		},
+		{
+			name:    "require-all with profile",
+			args:    []string{"render", "--profile", "prod", "--require-all"},
+			wantErr: "--require-all cannot be combined with --profile",
 		},
 		{
 			name:    "dry-run without profile",

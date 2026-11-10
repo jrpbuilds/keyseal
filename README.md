@@ -115,7 +115,7 @@ make build
 - `keyseal history <logical-name>` shows file-scoped Git history for one secret file
 - `keyseal commit` stages current Keyseal-managed changes and creates a Git commit
 - `keyseal rollback <logical-name> --to <commit>` restores one secret file from Git history
-- `keyseal render <logical-name...>` decrypts, merges, and renders secret values, skipping empty placeholder files
+- `keyseal render <logical-name...>` decrypts, merges, and renders secret values, with optional `--select` / `--require-all` for named-key automation output; empty placeholder files are skipped
 - `keyseal exec <logical-name...> -- <command...>` runs a child process with merged env vars; `--clean-env` and `--keep-env` control parent environment inheritance
 - `keyseal doctor` validates config sanity, Keyseal binary compatibility, SOPS CLI availability, age key/deployment context, `.sops.yaml` readiness, contract definitions, and common mistakes; `--scope`, `--profile`, and `--identity-profile` limit checks to one role or path set
 - `keyseal verify` runs strict CI checks, evaluates every declarative secret contract, and fails on any warning or failure, with the same scoping flags as doctor
@@ -150,6 +150,7 @@ keyseal compare production/platform/app production/platform/app-next --key CENTR
 keyseal history production/platform/app --oneline
 keyseal commit -m "Update production app secret"
 keyseal render production/platform/app --stdout --format json
+keyseal render production/platform/app --select APP_ENV,DB_HOST --format json --require-all --stdout
 keyseal render --profile production
 keyseal render --profile production --dry-run
 keyseal exec production/platform/app -- php artisan migrate
@@ -194,6 +195,9 @@ Key workflow details:
 - `verify` and `validate` decrypt referenced documents and evaluate contract rules, reporting key names and failed rules without printing values
 - a contract entry may set `from: path/to/file.yaml` (relative to `keyseal.yaml`) instead of an inline body
 - `render --profile --dry-run` decrypts and fully validates inputs (age key material required) but writes nothing and prints only the plan
+- `render --select` emits only the named keys after merge; without `--require-all`, absent keys are omitted (an empty object is success); with `--require-all`, any absent key exits 2 and writes nothing
+- `--select` filters emission only: requested documents are still decrypted in full; prefer `--format json` for automation and keep `--stdout` (or `--out`) explicit
+- `render` exit codes: 0 success; 1 usage/operational failure; 2 missing selected key with `--require-all`; 3 decrypt failure; 4 invalid decrypted document
 - `requirements.keyseal` in `keyseal.yaml` declares a Masterminds-style constraint (prefer `>=X.Y.Z`); config-backed commands fail closed before decrypting when the installed binary does not satisfy it
 - `help`, `--version`, `version`, and `version --check` remain available even when the repository requires a newer binary
 

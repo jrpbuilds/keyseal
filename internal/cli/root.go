@@ -47,7 +47,7 @@ func newRootCommand() *cobra.Command {
 			"  keyseal import production/platform/app-next --from-env-file ./intake.env --keys STRIPE_SECRET_KEY\n" +
 			"  keyseal updatekeys --all --yes\n" +
 			"  keyseal rollback production/platform/app --to abc1234 --dry-run\n" +
-			"  keyseal render production/platform/app --stdout\n" +
+			"  keyseal render production/platform/app --select APP_ENV,DB_HOST --format json --require-all --stdout\n" +
 			"  keyseal exec production/platform/app -- env | grep APP_\n" +
 			"  keyseal doctor\n" +
 			"  keyseal verify\n" +
