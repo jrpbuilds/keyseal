@@ -6,6 +6,8 @@ The format is intentionally lightweight and optimized for public release tags.
 
 ## Unreleased
 
+- `keyseal render --select` emits only named keys after merge, so automation can read JSON by key name instead of parsing full documents or shell output
+- `--require-all` fails closed when any selected key is absent; `render` uses stable exit codes for missing keys, decrypt failures, and invalid documents
 - `keyseal exec --clean-env` runs the child from an empty environment so unrelated shell credentials are not inherited
 - `--keep-env` with `--clean-env` copies only the named parent variables into that cleaned environment; secret document values still win on conflicts
 - Keyseal now builds with Go 1.27.3

@@ -21,6 +21,8 @@ func newRenderCommand() *cobra.Command {
 	var force bool
 	var profile string
 	var dryRun bool
+	var selectKeys []string
+	var requireAll bool
 
 	cmd := &cobra.Command{
 		Use:   "render <logical-name...>",
@@ -28,8 +30,12 @@ func newRenderCommand() *cobra.Command {
 		Long: "Decrypt and merge one or more env documents, then render them as dotenv, JSON, or YAML.\n" +
 			"Later files override earlier ones. Empty or whitespace-only placeholder files are skipped.\n" +
 			"Use --stdout to print secret values, or --out to write atomically to a file.\n" +
+			"Use --select to emit only named keys after the merge; --require-all fails when any\n" +
+			"selected key is absent. --select filters output only: each requested document is still\n" +
+			"decrypted in full. Prefer --format json for automation.\n" +
 			"Use --profile to execute every render defined by a named profile in keyseal.yaml.",
 		Example: "  keyseal render production/platform/app --stdout\n" +
+			"  keyseal render production/platform/app --select APP_ENV,DB_HOST --format json --require-all --stdout\n" +
 			"  keyseal render production/platform/app staging/platform/stripe --format json --out ./runtime/app-secrets.json\n" +
 			"  keyseal render --profile prod\n" +
 			"  keyseal render --profile prod --dry-run",
@@ -55,6 +61,16 @@ func newRenderCommand() *cobra.Command {
 			case !stdout && out == "":
 				return errors.New("require either --out or --stdout")
 			}
+
+			selectSet := cmd.Flags().Changed("select")
+			keys, err := normalizeSelectKeys(selectKeys, selectSet)
+			if err != nil {
+				return err
+			}
+			if requireAll && !selectSet {
+				return errors.New("--require-all requires --select")
+			}
+
 			cfg, cwd, err := loadConfigFromCWD()
 			if err != nil {
 				return err
@@ -65,18 +81,34 @@ func newRenderCommand() *cobra.Command {
 			if mode == "" {
 				mode = cfg.Defaults.FileMode
 			}
+			if selectSet {
+				if err := validateKeyNames(keys, validationOptions(cfg)); err != nil {
+					return err
+				}
+			}
 
 			// Read-only decrypt uses the SOPS Go library, so deploy hosts do not
 			// need the external sops binary just to render runtime secrets.
 			loaded, err := loadDocuments(cfg, cwd, args)
 			if err != nil {
-				return err
+				return mapRenderLoadError(err)
 			}
 			if len(loaded.SkippedPlaceholders) > 0 {
 				fmt.Fprintf(cmd.ErrOrStderr(), "skipped %d empty placeholder secret file(s): %s\n", len(loaded.SkippedPlaceholders), strings.Join(loaded.SkippedPlaceholders, ", "))
 			}
 			merged := render.MergeEnvDocs(loaded.Docs)
-			body, err := render.Render(format, merged)
+			values := merged
+			if selectSet {
+				selected, missing := render.Select(merged, keys)
+				if requireAll && len(missing) > 0 {
+					return renderExitError{
+						code: 2,
+						msg:  fmt.Sprintf("selected keys not found: %s", strings.Join(missing, ", ")),
+					}
+				}
+				values = selected
+			}
+			body, err := render.Render(format, values)
 			if err != nil {
 				return err
 			}
@@ -108,7 +140,61 @@ func newRenderCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "Allow unsafe modes and overwrite existing output")
 	cmd.Flags().StringVar(&profile, "profile", "", "Execute every render defined by this profile in keyseal.yaml")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "With --profile, resolve and validate all inputs, print the plan, and write nothing")
+	cmd.Flags().StringSliceVar(&selectKeys, "select", nil, "Comma-separated keys to include after merge (repeatable)")
+	cmd.Flags().BoolVar(&requireAll, "require-all", false, "With --select, fail if any selected key is absent")
 	return cmd
+}
+
+// normalizeSelectKeys trims --select tokens. When the flag was set, at least
+// one non-empty key is required so an empty list never means "render everything".
+func normalizeSelectKeys(raw []string, selectSet bool) ([]string, error) {
+	if !selectSet {
+		return nil, nil
+	}
+	keys := make([]string, 0, len(raw))
+	for _, key := range raw {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("--select requires at least one key name")
+	}
+	return keys, nil
+}
+
+// renderExitError carries a non-zero process exit code while still printing a
+// user-visible message. Unlike commandExitError, the message is not empty.
+type renderExitError struct {
+	code int
+	msg  string
+}
+
+func (e renderExitError) Error() string {
+	return e.msg
+}
+
+func (e renderExitError) ExitCode() int {
+	return e.code
+}
+
+// mapRenderLoadError maps tagged document load failures to render exit codes
+// 3 (decrypt) and 4 (invalid document) without changing the message text.
+func mapRenderLoadError(err error) error {
+	var loadErr documentLoadError
+	if !errors.As(err, &loadErr) {
+		return err
+	}
+	switch loadErr.kind {
+	case documentLoadDecrypt:
+		return renderExitError{code: 3, msg: loadErr.msg}
+	case documentLoadInvalid:
+		return renderExitError{code: 4, msg: loadErr.msg}
+	default:
+		return err
+	}
 }
 
 // profileRenderPlan is one fully resolved profile render. Its decrypted body
@@ -133,7 +219,7 @@ func runProfileRender(cmd *cobra.Command, name string, dryRun, force bool) error
 	// Profile renders take their format/out/mode from keyseal.yaml, so the
 	// explicit-render flags have no meaning here and are rejected explicitly
 	// via Changed() so even default-valued occurrences fail.
-	for _, flag := range []string{"format", "out", "stdout", "mode"} {
+	for _, flag := range []string{"format", "out", "stdout", "mode", "select", "require-all"} {
 		if cmd.Flags().Changed(flag) {
 			return fmt.Errorf("--%s cannot be combined with --profile; configure it on the profile renders in keyseal.yaml instead", flag)
 		}
@@ -179,7 +265,9 @@ func runProfileRender(cmd *cobra.Command, name string, dryRun, force bool) error
 		}
 		loaded, err := loadDocuments(cfg, cwd, r.Inputs)
 		if err != nil {
-			return fmt.Errorf("%s: %w", label, err)
+			// Preserve profile labels while still mapping decrypt/invalid-document
+			// failures to the same stable exit codes as explicit render.
+			return fmt.Errorf("%s: %w", label, mapRenderLoadError(err))
 		}
 		if len(loaded.SkippedPlaceholders) > 0 {
 			fmt.Fprintf(cmd.ErrOrStderr(), "skipped %d empty placeholder secret file(s): %s\n", len(loaded.SkippedPlaceholders), strings.Join(loaded.SkippedPlaceholders, ", "))

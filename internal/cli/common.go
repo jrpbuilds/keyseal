@@ -22,6 +22,31 @@ type loadedDocuments struct {
 	SkippedPlaceholders []string
 }
 
+// documentLoadKind classifies loadDocuments failures so render can map them to
+// stable exit codes without changing the user-visible error text.
+type documentLoadKind int
+
+const (
+	documentLoadOther documentLoadKind = iota
+	documentLoadDecrypt
+	documentLoadInvalid
+)
+
+// documentLoadError preserves today's loadDocuments messages while tagging
+// decrypt and invalid-document failures for render exit codes 3 and 4.
+type documentLoadError struct {
+	kind documentLoadKind
+	msg  string
+}
+
+func (e documentLoadError) Error() string {
+	return e.msg
+}
+
+func loadError(kind documentLoadKind, msg string) error {
+	return documentLoadError{kind: kind, msg: msg}
+}
+
 func loadDocuments(cfg config.Config, cwd string, logicalNames []string) (loadedDocuments, error) {
 	opts := validationOptions(cfg)
 	root := cfg.RepoRoot(cwd)
@@ -53,14 +78,14 @@ func loadDocuments(cfg config.Config, cwd string, logicalNames []string) (loaded
 		}
 		plaintext, err := sopsutil.DecryptFile(path, "yaml", ageKeyFile)
 		if err != nil {
-			return loadedDocuments{}, err
+			return loadedDocuments{}, loadError(documentLoadDecrypt, err.Error())
 		}
 		doc, _, err := schema.ParseYAMLDocument(plaintext)
 		if err != nil {
-			return loadedDocuments{}, fmt.Errorf("parse %s: %w", logical, err)
+			return loadedDocuments{}, loadError(documentLoadInvalid, fmt.Sprintf("parse %s: %v", logical, err))
 		}
 		if err := doc.Validate(opts); err != nil {
-			return loadedDocuments{}, fmt.Errorf("validate %s: %w", logical, err)
+			return loadedDocuments{}, loadError(documentLoadInvalid, fmt.Sprintf("validate %s: %v", logical, err))
 		}
 		result.Docs = append(result.Docs, doc)
 		result.LoadedLogicalNames = append(result.LoadedLogicalNames, logical)

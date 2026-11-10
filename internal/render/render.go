@@ -27,6 +27,24 @@ func MergeEnvDocs(docs []schema.EnvSecretDocument) map[string]string {
 	return merged
 }
 
+// Select returns a new map containing only the requested keys that are present
+// in values. Missing names are returned in request order. Empty-string values
+// count as present. The returned map is independent of values so callers can
+// discard the full merge after filtering.
+func Select(values map[string]string, keys []string) (map[string]string, []string) {
+	selected := make(map[string]string, len(keys))
+	missing := make([]string, 0)
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok {
+			missing = append(missing, key)
+			continue
+		}
+		selected[key] = value
+	}
+	return selected, missing
+}
+
 // RenderDotenv renders env values in stable key order with conservative
 // escaping so the output is predictable and shell-friendly.
 func RenderDotenv(values map[string]string) ([]byte, error) {
