@@ -169,40 +169,14 @@ keyseal validate production-app --json
 
 Key workflow details:
 
-- `-m, --message` implies commit on mutating commands
-- `--commit` commits only the files the command changed; anything else you have staged stays staged
-- `git.auto_commit` is off by default
-- `set` reads values only from stdin or a file descriptor, never from arguments; on a terminal it prompts without echo
-- each `clone`, `set`, `unset`, `generate`, or `import` run is one transaction: the document is re-encrypted with the `.sops.yaml` rule for its path, decrypted again to verify it, and only then replaces the original; on any failure the original is left untouched
-- mutations refuse to write if the `.sops.yaml` rule for the path would leave any secret value unencrypted, for example an `encrypted_regex` that does not cover `values`
-- because mutations re-encrypt, they also apply any recipient changes in `.sops.yaml` that `updatekeys` has not yet synced
-- mutation commands print key names and actions only, never values
-- `sops.age_key_file` is used as the default age key path unless `SOPS_AGE_KEY_FILE` is already set
-- read-only decrypt paths use the SOPS Go library and do not require external `sops` or `age` binaries
-- mutating commands check the configured `sops.binary` before creating, editing, or rotating encrypted files
-- `updatekeys` uses `.sops.yaml` as the recipient source of truth and does not rotate secret values or data encryption keys
-- `keyseal commit` stages only Keyseal-managed files, not the whole repo; named commits stage only those documents and refuse missing, unchanged, ambiguous, or invalid names before touching Git
-- `keyseal commit --dry-run` lists the exact repo-relative paths that would be staged without changing the index or creating a commit
-- `rollback` restores the encrypted file from Git history; `--dry-run` previews safely
-- `inspect`, `compare`, and `diff --semantic` decrypt in memory and print key names, states, and outcomes only, never values; they need your age key
-- `inspect` and `compare` exit 1 for a missing file, an empty placeholder, plaintext at an encrypted path, or a decrypt failure; `diff --semantic` also accepts one side being absent, such as a file added since the revision
-- `--assert-equal` and `--assert-unequal` exit 1 when the assertion does not hold; use `--key` (repeatable) to assert on specific keys, and `--json` for automation
-- `--show-length`, `--show-type`, and `--fingerprint` add optional metadata and never change an outcome; `--fingerprint` is a keyed HMAC-SHA256 using the key file named by `KEYSEAL_FINGERPRINT_KEY_FILE` (at least 32 bytes), never an unsalted hash
-- `diff --semantic` compares the working tree with the revision, so staged and unstaged edits both appear; flagless `diff` still shows the ciphertext `git diff` and needs no age key
-- `profiles` in `keyseal.yaml` group render definitions; all profiles are validated on every config load, so a malformed profile blocks any command until fixed
-- `contracts` in `keyseal.yaml` declare generic secret requirements (required/forbidden keys, length/regex/non-empty rules, equality, and conditionals); bare keys use last-wins merge across listed documents
-- `required` means the key is present (empty string is allowed); use `non_empty` when whitespace-only values must fail
-- `doctor` checks that contract definitions are well-formed and that listed documents exist; it does not evaluate secret values
-- `access_profiles` in `keyseal.yaml` describe which logical documents a role should validate; they are separate from render `profiles`, and must never contain private age keys
-- scoped `doctor`/`verify` runs report documents outside the selected role as excluded instead of as decrypt failures, so intentional recipient separation does not fail the other role
-- `verify` and `validate` decrypt referenced documents and evaluate contract rules, reporting key names and failed rules without printing values
-- a contract entry may set `from: path/to/file.yaml` (relative to `keyseal.yaml`) instead of an inline body
-- `render --profile --dry-run` decrypts and fully validates inputs (age key material required) but writes nothing and prints only the plan
-- `render --select` emits only the named keys after merge; without `--require-all`, absent keys are omitted (an empty object is success); with `--require-all`, any absent key exits 2 and writes nothing
-- `--select` filters emission only: requested documents are still decrypted in full; prefer `--format json` for automation and keep `--stdout` (or `--out`) explicit
-- `render` exit codes: 0 success; 1 usage/operational failure; 2 missing selected key with `--require-all`; 3 decrypt failure; 4 invalid decrypted document
-- `requirements.keyseal` in `keyseal.yaml` declares a Masterminds-style constraint (prefer `>=X.Y.Z`); config-backed commands fail closed before decrypting when the installed binary does not satisfy it
-- `help`, `--version`, `version`, and `version --check` remain available even when the repository requires a newer binary
+- `-m` implies commit on mutating commands; `--commit` only commits the files that command changed; `git.auto_commit` is off by default
+- `set` reads values from stdin or a file descriptor only; mutations verify before save, refuse unencrypted writes, print key names never values, and leave the original untouched on failure
+- `sops.age_key_file` is the default age key path unless `SOPS_AGE_KEY_FILE` is set; read-only decrypt uses the SOPS Go library, while mutating commands still need the `sops` binary
+- `keyseal commit` stages only Keyseal-managed files; named commits and `--dry-run` preview or limit that set without touching unrelated work
+- `inspect`, `compare`, and `diff --semantic` report key state without values; optional `--show-length`, `--show-type`, and keyed `--fingerprint` add metadata only
+- Render `profiles`, secret `contracts`, and `access_profiles` live in `keyseal.yaml`; scoped `doctor`/`verify` report out-of-scope documents as excluded
+- `render --select` filters emission after a full decrypt; `--require-all` exits 2 when a selected key is missing; prefer `--format json` with an explicit `--stdout` or `--out`
+- `requirements.keyseal` fails closed before decrypt when the binary is too old; `help`, `--version`, and `version --check` still work
 
 For exact command behavior and more examples, see the [Command Reference](https://github.com/jrpbuilds/keyseal/wiki/Command-Reference), [Configuration Reference](https://github.com/jrpbuilds/keyseal/wiki/Configuration-Reference), and [Troubleshooting](https://github.com/jrpbuilds/keyseal/wiki/Troubleshooting) wiki pages.
 
@@ -212,12 +186,12 @@ For exact command behavior and more examples, see the [Command Reference](https:
 keyseal --version
 keyseal version
 keyseal version --short
-keyseal version --check ">=1.1.0"
+keyseal version --check ">=1.2.0"
 ```
 
 Release builds stamp version, commit, and build date metadata via Go linker flags. Local builds default to `dev`, `unknown`, and `unknown` unless you pass `VERSION`, `COMMIT`, and `DATE`. When Git metadata is available, local builds use the latest `v*` tag and the short current commit.
 
-Compatibility checks are local and need no network access. Unstamped values such as `dev` or `ci` fail closed when a requirement is present. Git-describe stamps like `v1.1.0-6-gfdac110` are treated as build metadata on `1.1.0` so they satisfy `>=1.1.0`. Prefer a simple `>=X.Y.Z` constraint in repositories. Checks trust the binary's stamped version string, so a forged stamp can bypass the gate; use release artifacts or package integrity when you need stronger assurance.
+Compatibility checks are local and need no network access. Unstamped values such as `dev` or `ci` fail closed when a requirement is present. Git-describe stamps like `v1.2.0-6-gfdac110` are treated as build metadata on `1.2.0` so they satisfy `>=1.2.0`. Prefer a simple `>=X.Y.Z` constraint in repositories. Checks trust the binary's stamped version string, so a forged stamp can bypass the gate; use release artifacts or package integrity when you need stronger assurance.
 
 Bootstrap CI, Ansible, or a deployment controller with `keyseal version --check` before loading repository config, then use `keyseal verify` as the gate after checkout. Fuller recipes live in the [Installation](https://github.com/jrpbuilds/keyseal/wiki/Installation) and [Command Reference](https://github.com/jrpbuilds/keyseal/wiki/Command-Reference) wiki pages.
 

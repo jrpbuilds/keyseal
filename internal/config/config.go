@@ -107,7 +107,7 @@ type ValidationConfig struct {
 	KeyPattern    string `yaml:"key_pattern"`
 }
 
-// Profile is reserved for small grouped render definitions in future versions.
+// Profile groups declarative render definitions for keyseal render --profile.
 type Profile struct {
 	Renders []RenderProfile `yaml:"renders"`
 }
