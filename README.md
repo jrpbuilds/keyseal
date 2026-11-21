@@ -113,7 +113,7 @@ make build
 - `keyseal inspect <logical-name>` reports each key as present, empty, or missing without showing values
 - `keyseal compare <left> <right>` reports each key as equal, different, added, or removed, with `--assert-equal` and `--assert-unequal` for CI
 - `keyseal history <logical-name>` shows file-scoped Git history for one secret file
-- `keyseal commit` stages current Keyseal-managed changes and creates a Git commit
+- `keyseal commit [logical-name...]` stages current Keyseal-managed changes and creates a Git commit; logical names restrict staging to those documents, and `--dry-run` lists the paths that would be staged
 - `keyseal rollback <logical-name> --to <commit>` restores one secret file from Git history
 - `keyseal render <logical-name...>` decrypts, merges, and renders secret values, with optional `--select` / `--require-all` for named-key automation output; empty placeholder files are skipped
 - `keyseal exec <logical-name...> -- <command...>` runs a child process with merged env vars; `--clean-env` and `--keep-env` control parent environment inheritance
@@ -149,6 +149,8 @@ keyseal inspect production/platform/app --json --key DATABASE_URL --show-length 
 keyseal compare production/platform/app production/platform/app-next --key CENTRAL_API_SECRET --assert-equal
 keyseal history production/platform/app --oneline
 keyseal commit -m "Update production app secret"
+keyseal commit production/platform/app --dry-run
+keyseal commit production/platform/app -m "Prepare production app release"
 keyseal render production/platform/app --stdout --format json
 keyseal render production/platform/app --select APP_ENV,DB_HOST --format json --require-all --stdout
 keyseal render --profile production
@@ -179,7 +181,8 @@ Key workflow details:
 - read-only decrypt paths use the SOPS Go library and do not require external `sops` or `age` binaries
 - mutating commands check the configured `sops.binary` before creating, editing, or rotating encrypted files
 - `updatekeys` uses `.sops.yaml` as the recipient source of truth and does not rotate secret values or data encryption keys
-- `keyseal commit` stages only Keyseal-managed files, not the whole repo
+- `keyseal commit` stages only Keyseal-managed files, not the whole repo; named commits stage only those documents and refuse missing, unchanged, ambiguous, or invalid names before touching Git
+- `keyseal commit --dry-run` lists the exact repo-relative paths that would be staged without changing the index or creating a commit
 - `rollback` restores the encrypted file from Git history; `--dry-run` previews safely
 - `inspect`, `compare`, and `diff --semantic` decrypt in memory and print key names, states, and outcomes only, never values; they need your age key
 - `inspect` and `compare` exit 1 for a missing file, an empty placeholder, plaintext at an encrypted path, or a decrypt failure; `diff --semantic` also accepts one side being absent, such as a file added since the revision

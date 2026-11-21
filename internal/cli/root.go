@@ -39,6 +39,8 @@ func newRootCommand() *cobra.Command {
 			"  keyseal compare production/platform/app production/platform/app-next --assert-unequal\n" +
 			"  keyseal history production/platform/app\n" +
 			"  keyseal commit -m \"Rotate Stripe webhook secret\"\n" +
+			"  keyseal commit production/platform/app --dry-run\n" +
+			"  keyseal commit production/platform/app -m \"Prepare production app release\"\n" +
 			"  keyseal edit production/platform/app\n" +
 			"  keyseal clone production/platform/app production/platform/app-next\n" +
 			"  keyseal set production/platform/app-next STRIPE_SECRET_KEY --stdin\n" +
