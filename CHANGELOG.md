@@ -6,46 +6,36 @@ The format is intentionally lightweight and optimized for public release tags.
 
 ## Unreleased
 
-- `keyseal commit` accepts logical names to stage only those documents, and `--dry-run` lists the exact paths that would be staged without creating a commit
-- `keyseal render --select` emits only named keys after merge, so automation can read JSON by key name instead of parsing full documents or shell output
-- `--require-all` fails closed when any selected key is absent; `render` uses stable exit codes for missing keys, decrypt failures, and invalid documents
-- `keyseal exec --clean-env` runs the child from an empty environment so unrelated shell credentials are not inherited
-- `--keep-env` with `--clean-env` copies only the named parent variables into that cleaned environment; secret document values still win on conflicts
-- Keyseal now builds with Go 1.27.3
-- `keyseal doctor` and `keyseal verify` can limit document checks with `--scope`, `--profile`, or `--identity-profile` so repositories with multiple recipient groups validate only the documents a role is meant to decrypt
-- documents outside the selected scope are reported as excluded instead of as decrypt failures
-- `access_profiles` in `keyseal.yaml` declare include/exclude globs and optional public age recipients for identity-aware checks, without private key material
-- repositories can declare `requirements.keyseal` so an older installed Keyseal binary fails before decrypting or changing secrets
-- `keyseal version --check` lets CI, Ansible, and deployment controllers verify a constraint without loading `keyseal.yaml`
-- `keyseal doctor` and `keyseal verify` report a dedicated Keyseal binary compatibility check
+## v1.2.0
 
-## v1.2.0 (2026-10-19)
+This release makes Keyseal easier to drive from automation and safer to use in mixed repositories: selected-key render, cleaner exec environments, scoped commits, secret contracts, and repository version gates.
 
-Highlights:
-- `keyseal render --profile <name>` executes every render defined by a profile in `keyseal.yaml`, resolving, decrypting, and pre-flighting all outputs before any write
-- `--dry-run` with `--profile` validates the full plan and prints it without writing; it decrypts to fully validate inputs but never exposes values
-- profile definitions are validated at config load: empty inputs, unknown formats, invalid modes, and duplicate output paths within a profile are all rejected
-- `keyseal doctor` and `keyseal verify` now report per-profile configuration and input-resolvability problems as discrete checks
-- new `keyseal clone` copies a secret document to a new name, encrypted for the recipients configured for the destination
-- new `keyseal set`, `unset`, `generate`, and `import` change secret values without opening an editor; values come only from stdin, a file descriptor, or an env file
-- every change is verified before it is saved, and the original file is left untouched if anything fails
-- changes are refused if your SOPS rules would leave any secret value unencrypted
-- `keyseal generate` creates strong random values as URL-safe base64, base64, or hex
-- `keyseal unset` fails clearly when a key is not present instead of reporting success
-- `--commit` now commits only the files the command changed, leaving your other staged work alone
-- `keyseal add` and `keyseal edit` no longer write a temporary plaintext file while encrypting
-- declarative secret contracts in `keyseal.yaml` can require, forbid, and constrain keys across one or more documents
-- contracts support minimum length, regex, non-empty, equality, inequality, distinct values, and conditional requirements
-- `keyseal doctor` reports malformed contract definitions and missing contract documents without decrypting values
-- `keyseal verify` evaluates every contract against decrypted secrets and fails when any rule is violated
-- new `keyseal validate <contract>` evaluates one named contract with optional machine-readable `--json` output
-- contract failures report key names and rule kinds only, never secret values
-- new `keyseal inspect <name>` shows whether each key is present, empty, or missing without printing any values
-- new `keyseal compare <left> <right>` reports each key as equal, different, added, or removed, with `--assert-equal` and `--assert-unequal` for CI
-- `keyseal diff <name> --semantic` compares a secret with `HEAD` or `--to <revision>` key by key, without showing values
-- inspect, compare, and semantic diff can add value length, type, or a keyed fingerprint, and support `--json` for scripts
-- Keyseal now builds with Go 1.27.2
-- dependency updates close the HTTP/2 findings from the vulnerability scan
+### Render and exec
+
+- `keyseal render --profile` runs every render defined in `keyseal.yaml`, with `--dry-run` to validate the plan without writing
+- `keyseal render --select` emits only named keys after merge; `--require-all` fails closed when any selected key is missing
+- Stable `render` exit codes distinguish missing keys, decrypt failures, and invalid documents
+- `keyseal exec --clean-env` starts the child from an empty environment; `--keep-env` copies only the named parent variables
+
+### Git and mutations
+
+- `keyseal commit` accepts logical names to stage only those documents, and `--dry-run` lists the exact paths that would be staged
+- Named commits refuse missing, unchanged, ambiguous, or invalid names before touching Git
+- New `clone`, `set`, `unset`, `generate`, and `import` change secrets without an editor; values come from stdin, a file descriptor, or an env file
+- Mutations verify before save, leave the original untouched on failure, and refuse writes that would leave secret values unencrypted
+- `--commit` on mutating commands commits only the files that command changed
+
+### Validation and compatibility
+
+- Declarative `contracts` in `keyseal.yaml`, plus `keyseal validate`, enforce required and forbidden keys and related rules without printing values
+- `keyseal inspect`, `compare`, and `diff --semantic` report key state without showing secret values
+- `doctor` and `verify` can scope checks with `--scope`, `--profile`, or `--identity-profile`, using `access_profiles` for role-aware include/exclude globs
+- Repositories can declare `requirements.keyseal`; `keyseal version --check` validates a constraint without loading the repo
+
+### Toolchain
+
+- Builds with Go 1.27.3
+- Dependency updates close the HTTP/2 findings from the vulnerability scan
 
 ## v1.1.0
 
