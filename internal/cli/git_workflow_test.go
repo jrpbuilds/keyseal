@@ -201,6 +201,263 @@ func TestCommitIncludesBothSidesOfStagedRename(t *testing.T) {
 	}
 }
 
+func TestCommitScopedToLogicalNamesLeavesOtherChangesUntouched(t *testing.T) {
+	repoRoot := seedMixedDirtyCommitRepo(t)
+	const marker = "super-secret-value"
+
+	before := gitOutput(t, repoRoot, "status", "--porcelain")
+	output, err := runRootCommand(t, repoRoot, "commit", "production/platform/app", "-m", "chore(secrets): prepare production release")
+	if err != nil {
+		t.Fatalf("runRootCommand returned error: %v", err)
+	}
+	if !strings.Contains(output, "committed Git change: chore(secrets): prepare production release") {
+		t.Fatalf("expected commit message line, got %q", output)
+	}
+	if !strings.Contains(output, "production/platform/app\n") {
+		t.Fatalf("expected committed logical name, got %q", output)
+	}
+	if strings.Contains(output, marker) {
+		t.Fatalf("commit output leaked file contents: %q", output)
+	}
+	if got := strings.TrimSpace(gitOutput(t, repoRoot, "log", "-1", "--pretty=%s")); got != "chore(secrets): prepare production release" {
+		t.Fatalf("expected scoped commit subject, got %q", got)
+	}
+	committed := gitOutput(t, repoRoot, "show", "--name-only", "--pretty=format:", "HEAD")
+	if !strings.Contains(committed, "production/platform/app.enc.yaml") {
+		t.Fatalf("expected app secret in commit, got %q", committed)
+	}
+	for _, path := range []string{
+		"production/platform/api.enc.yaml",
+		"production/platform/worker.enc.yaml",
+		"keyseal.yaml",
+		"notes.txt",
+		"staged.txt",
+	} {
+		if strings.Contains(committed, path) {
+			t.Fatalf("expected %s to stay out of the scoped commit, got %q", path, committed)
+		}
+	}
+	status := gitOutput(t, repoRoot, "status", "--porcelain")
+	for _, want := range []string{
+		" M production/platform/api.enc.yaml",
+		"M  production/platform/worker.enc.yaml",
+		" M keyseal.yaml",
+		" M notes.txt",
+		"A  staged.txt",
+	} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("expected %q to remain after scoped commit; before=%q after=%q", want, before, status)
+		}
+	}
+	if strings.Contains(status, "production/platform/app.enc.yaml") {
+		t.Fatalf("expected requested secret to be committed, got %q", status)
+	}
+}
+
+func TestCommitScopedRestagesRequestedWorktreeEdits(t *testing.T) {
+	repoRoot := seedKeysealRepo(t, false)
+	target := filepath.Join(repoRoot, "production/platform/app.enc.yaml")
+	writeFileForCLI(t, target, "v1\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "notes.txt"), "staged by operator\n")
+	gitRun(t, repoRoot, "add", "--", "production/platform/app.enc.yaml", "notes.txt")
+	gitRun(t, repoRoot, "commit", "-m", "seed")
+
+	writeFileForCLI(t, target, "staged-first\n")
+	gitRun(t, repoRoot, "add", "--", "production/platform/app.enc.yaml")
+	writeFileForCLI(t, target, "worktree-final\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "notes.txt"), "still staged\n")
+	gitRun(t, repoRoot, "add", "--", "notes.txt")
+
+	if _, err := runRootCommand(t, repoRoot, "commit", "production/platform/app", "-m", "Capture worktree"); err != nil {
+		t.Fatalf("runRootCommand returned error: %v", err)
+	}
+	body := gitOutput(t, repoRoot, "show", "HEAD:production/platform/app.enc.yaml")
+	if body != "worktree-final\n" {
+		t.Fatalf("expected commit to include worktree contents, got %q", body)
+	}
+	status := gitOutput(t, repoRoot, "status", "--porcelain")
+	if !strings.Contains(status, "M  notes.txt") && !strings.Contains(status, "A  notes.txt") {
+		if !strings.Contains(status, "notes.txt") {
+			t.Fatalf("expected unrelated staged file to remain staged, got %q", status)
+		}
+	}
+}
+
+func TestCommitDryRunListsExactPathsAndLeavesTreeUntouched(t *testing.T) {
+	repoRoot := seedMixedDirtyCommitRepo(t)
+	beforeHEAD := strings.TrimSpace(gitOutput(t, repoRoot, "rev-parse", "HEAD"))
+	beforeStatus := gitOutput(t, repoRoot, "status", "--porcelain")
+	const marker = "super-secret-value"
+
+	output, err := runRootCommand(t, repoRoot, "commit", "production/platform/app", "--dry-run", "-m", "ignored")
+	if err != nil {
+		t.Fatalf("runRootCommand returned error: %v", err)
+	}
+	if got := strings.TrimSpace(output); got != "would stage production/platform/app.enc.yaml" {
+		t.Fatalf("unexpected dry-run output: %q", output)
+	}
+	if strings.Contains(output, marker) {
+		t.Fatalf("dry-run output leaked file contents: %q", output)
+	}
+	if afterHEAD := strings.TrimSpace(gitOutput(t, repoRoot, "rev-parse", "HEAD")); afterHEAD != beforeHEAD {
+		t.Fatalf("dry-run changed HEAD from %s to %s", beforeHEAD, afterHEAD)
+	}
+	if afterStatus := gitOutput(t, repoRoot, "status", "--porcelain"); afterStatus != beforeStatus {
+		t.Fatalf("dry-run changed status;\nbefore=%q\nafter=%q", beforeStatus, afterStatus)
+	}
+
+	allOutput, err := runRootCommand(t, repoRoot, "commit", "--dry-run")
+	if err != nil {
+		t.Fatalf("runRootCommand returned error: %v", err)
+	}
+	for _, path := range []string{
+		"production/platform/app.enc.yaml",
+		"production/platform/api.enc.yaml",
+		"production/platform/worker.enc.yaml",
+		"keyseal.yaml",
+	} {
+		if !strings.Contains(allOutput, "would stage "+path+"\n") && !strings.HasSuffix(strings.TrimSpace(allOutput), "would stage "+path) {
+			t.Fatalf("expected no-arg dry-run to list %s, got %q", path, allOutput)
+		}
+	}
+	if strings.Contains(allOutput, "notes.txt") || strings.Contains(allOutput, "staged.txt") {
+		t.Fatalf("expected dry-run to omit unrelated files, got %q", allOutput)
+	}
+}
+
+func TestCommitNamedRefusesMissingUnchangedAndInvalidNames(t *testing.T) {
+	repoRoot := seedKeysealRepo(t, false)
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/app.enc.yaml"), "v1\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/api.enc.yaml"), "v1\n")
+	gitRun(t, repoRoot, "add", "--", "production/platform/app.enc.yaml", "production/platform/api.enc.yaml")
+	gitRun(t, repoRoot, "commit", "-m", "seed secrets")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/app.enc.yaml"), "dirty\n")
+	beforeHEAD := strings.TrimSpace(gitOutput(t, repoRoot, "rev-parse", "HEAD"))
+	beforeStatus := gitOutput(t, repoRoot, "status", "--porcelain")
+
+	_, err := runRootCommand(t, repoRoot,
+		"commit",
+		"production/platform/missing",
+		"production/platform/api",
+		"production/platform/app",
+		"-m", "should not commit",
+	)
+	if err == nil {
+		t.Fatal("expected named commit to refuse missing and unchanged names")
+	}
+	errText := err.Error()
+	if !strings.Contains(errText, "secret production/platform/missing not found") {
+		t.Fatalf("expected missing name in error, got %v", err)
+	}
+	if !strings.Contains(errText, "secret production/platform/api is unchanged") {
+		t.Fatalf("expected unchanged name in error, got %v", err)
+	}
+	if afterHEAD := strings.TrimSpace(gitOutput(t, repoRoot, "rev-parse", "HEAD")); afterHEAD != beforeHEAD {
+		t.Fatalf("failed named commit changed HEAD from %s to %s", beforeHEAD, afterHEAD)
+	}
+	afterStatus := gitOutput(t, repoRoot, "status", "--porcelain")
+	if afterStatus != beforeStatus {
+		t.Fatalf("failed named commit changed status;\nbefore=%q\nafter=%q", beforeStatus, afterStatus)
+	}
+	if !strings.Contains(afterStatus, " M production/platform/app.enc.yaml") {
+		t.Fatalf("expected dirty requested file to remain unstaged, got %q", afterStatus)
+	}
+
+	for _, args := range [][]string{
+		{"commit", "../outside", "-m", "no"},
+		{"commit", "production/platform/app.enc.yaml", "-m", "no"},
+		{"commit", "production/platform/app", "production/platform/app", "-m", "no"},
+		{"commit", "production/*", "-m", "no"},
+	} {
+		_, err := runRootCommand(t, repoRoot, args...)
+		if err == nil {
+			t.Fatalf("expected %v to fail", args)
+		}
+		if afterHEAD := strings.TrimSpace(gitOutput(t, repoRoot, "rev-parse", "HEAD")); afterHEAD != beforeHEAD {
+			t.Fatalf("%v changed HEAD", args)
+		}
+	}
+}
+
+func TestCommitScopedRenameIncludesBothSides(t *testing.T) {
+	repoRoot := seedKeysealRepo(t, false)
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/a.enc.yaml"), "secret\n")
+	gitRun(t, repoRoot, "add", "--", "production/a.enc.yaml")
+	gitRun(t, repoRoot, "commit", "-m", "add a")
+	gitRun(t, repoRoot, "mv", "production/a.enc.yaml", "production/b.enc.yaml")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/other.enc.yaml"), "other\n")
+
+	output, err := runRootCommand(t, repoRoot, "commit", "production/b", "-m", "Rename a to b")
+	if err != nil {
+		t.Fatalf("runRootCommand returned error: %v", err)
+	}
+	if !strings.Contains(output, "production/a\n") || !strings.Contains(output, "production/b\n") {
+		t.Fatalf("expected rename to list both logical names, got %q", output)
+	}
+	tree := gitOutput(t, repoRoot, "ls-tree", "-r", "--name-only", "HEAD")
+	if !strings.Contains(tree, "production/b.enc.yaml") || strings.Contains(tree, "production/a.enc.yaml") {
+		t.Fatalf("expected HEAD to contain only the renamed file, got %q", tree)
+	}
+	status := gitOutput(t, repoRoot, "status", "--porcelain")
+	if !strings.Contains(status, "production/other.enc.yaml") {
+		t.Fatalf("expected unrelated secret to remain uncommitted, got %q", status)
+	}
+}
+
+func TestCommitNoArgsStillIncludesConfigAndSecrets(t *testing.T) {
+	repoRoot := seedKeysealRepo(t, false)
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/app.enc.yaml"), "v1\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "notes.txt"), "v1\n")
+	gitRun(t, repoRoot, "add", "--", "production/platform/app.enc.yaml", "notes.txt")
+	gitRun(t, repoRoot, "commit", "-m", "seed")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/app.enc.yaml"), "v2\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "keyseal.yaml"), defaultConfigYAML("default")+"# dirty\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "notes.txt"), "v2\n")
+
+	if _, err := runRootCommand(t, repoRoot, "commit", "-m", "Batch update"); err != nil {
+		t.Fatalf("runRootCommand returned error: %v", err)
+	}
+	committed := gitOutput(t, repoRoot, "show", "--name-only", "--pretty=format:", "HEAD")
+	if !strings.Contains(committed, "production/platform/app.enc.yaml") || !strings.Contains(committed, "keyseal.yaml") {
+		t.Fatalf("expected no-arg commit to include secret and config, got %q", committed)
+	}
+	if strings.Contains(committed, "notes.txt") {
+		t.Fatalf("expected unrelated file to stay out of no-arg commit, got %q", committed)
+	}
+	status := gitOutput(t, repoRoot, "status", "--short")
+	if !strings.Contains(status, " M notes.txt") {
+		t.Fatalf("expected unrelated file to remain unstaged, got %q", status)
+	}
+}
+
+func seedMixedDirtyCommitRepo(t *testing.T) string {
+	t.Helper()
+
+	repoRoot := seedKeysealRepo(t, false)
+	const marker = "super-secret-value"
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/app.enc.yaml"), "old-"+marker+"\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/api.enc.yaml"), "old-api\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/worker.enc.yaml"), "old-worker\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "notes.txt"), "old-notes\n")
+	gitRun(t, repoRoot, "add", "--",
+		"production/platform/app.enc.yaml",
+		"production/platform/api.enc.yaml",
+		"production/platform/worker.enc.yaml",
+		"notes.txt",
+	)
+	gitRun(t, repoRoot, "commit", "-m", "seed mixed dirty fixtures")
+
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/app.enc.yaml"), "new-"+marker+"\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/api.enc.yaml"), "new-api\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "production/platform/worker.enc.yaml"), "new-worker\n")
+	gitRun(t, repoRoot, "add", "--", "production/platform/worker.enc.yaml")
+	writeFileForCLI(t, filepath.Join(repoRoot, "keyseal.yaml"), defaultConfigYAML("default")+"# dirty config\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "notes.txt"), "new-notes\n")
+	writeFileForCLI(t, filepath.Join(repoRoot, "staged.txt"), "pre-staged\n")
+	gitRun(t, repoRoot, "add", "--", "staged.txt")
+	return repoRoot
+}
+
 func TestAddMessageImpliesCommit(t *testing.T) {
 	repoRoot := seedKeysealRepo(t, false)
 	configureFakeEncryptSOPS(t, repoRoot)

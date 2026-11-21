@@ -6,6 +6,7 @@ The format is intentionally lightweight and optimized for public release tags.
 
 ## Unreleased
 
+- `keyseal commit` accepts logical names to stage only those documents, and `--dry-run` lists the exact paths that would be staged without creating a commit
 - `keyseal render --select` emits only named keys after merge, so automation can read JSON by key name instead of parsing full documents or shell output
 - `--require-all` fails closed when any selected key is absent; `render` uses stable exit codes for missing keys, decrypt failures, and invalid documents
 - `keyseal exec --clean-env` runs the child from an empty environment so unrelated shell credentials are not inherited
