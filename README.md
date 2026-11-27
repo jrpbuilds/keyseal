@@ -173,7 +173,7 @@ Key workflow details:
 - `set` reads values from stdin or a file descriptor only; mutations verify before save, refuse unencrypted writes, print key names never values, and leave the original untouched on failure
 - `sops.age_key_file` is the default age key path unless `SOPS_AGE_KEY_FILE` is set; read-only decrypt uses the SOPS Go library, while mutating commands still need the `sops` binary
 - `keyseal commit` stages only Keyseal-managed files; named commits and `--dry-run` preview or limit that set without touching unrelated work
-- `inspect`, `compare`, and `diff --semantic` report key state without values; optional `--show-length`, `--show-type`, and keyed `--fingerprint` add metadata only
+- `inspect`, `compare`, and `diff --semantic` report key state without values; optional `--show-length`, `--show-type`, and keyed `--fingerprint` add metadata only. `--fingerprint` reads the key file named by `KEYSEAL_FINGERPRINT_KEY_FILE`
 - Render `profiles`, secret `contracts`, and `access_profiles` live in `keyseal.yaml`; scoped `doctor`/`verify` report out-of-scope documents as excluded
 - `render --select` filters emission after a full decrypt; `--require-all` exits 2 when a selected key is missing; prefer `--format json` with an explicit `--stdout` or `--out`
 - `requirements.keyseal` fails closed before decrypt when the binary is too old; `help`, `--version`, and `version --check` still work
@@ -198,7 +198,7 @@ Bootstrap CI, Ansible, or a deployment controller with `keyseal version --check`
 ## Release artifacts
 
 ```bash
-make dist VERSION=v1.0.0 COMMIT=$(git rev-parse --short HEAD) DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+make dist VERSION=v1.2.0 COMMIT=$(git rev-parse --short HEAD) DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ```
 
 `make dist` builds tar.gz archives, `.deb` and `.rpm` packages for Linux (amd64, arm64), and a single SHA256 checksums file covering all artifacts to `dist/`. Linux packages require [nfpm](https://nfpm.goreleaser.com/install/) to be installed.

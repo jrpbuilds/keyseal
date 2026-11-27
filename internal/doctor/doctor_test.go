@@ -355,6 +355,9 @@ func TestDoctorDecryptsWithLibraryWhenSOPSMissing(t *testing.T) {
 	if binaryCheck.Status != doctor.StatusOK {
 		t.Fatalf("expected missing sops to be informational, got %#v", binaryCheck)
 	}
+	if !containsSubstring(binaryCheck.Details, "clone, set, unset, generate, and import") {
+		t.Fatalf("expected missing-sops details to name mutation commands, got %#v", binaryCheck.Details)
+	}
 	secretCheck := findCheck(t, result, "secret production/platform/app")
 	if secretCheck.Status != doctor.StatusOK {
 		t.Fatalf("expected library decrypt validation to pass without sops CLI, got %#v", secretCheck)
