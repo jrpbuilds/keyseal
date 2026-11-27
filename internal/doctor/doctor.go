@@ -738,7 +738,7 @@ func runSOPSBinaryChecks(cfg config.Config, cwd string, result *Result) bool {
 				fmt.Sprintf("Configured value: %q", binary),
 				fmt.Sprintf("Lookup error: %v", err),
 				"Read-only decrypt, render, exec, doctor, and verify use the official SOPS Go decrypt library and do not require the external binary.",
-				"The external SOPS binary is still required for add, edit, and updatekeys.",
+				"The external SOPS binary is still required for add, edit, updatekeys, clone, set, unset, generate, and import.",
 			},
 			Remediation: []string{
 				fmt.Sprintf("Install SOPS and make %q available in PATH, or update sops.binary in keyseal.yaml before running mutating commands.", binary),
@@ -760,7 +760,7 @@ func runSOPSBinaryChecks(cfg config.Config, cwd string, result *Result) bool {
 				"Read-only decrypt validation can still run through the SOPS Go library.",
 			},
 			Remediation: []string{
-				"Ensure the configured SOPS binary is executable before running add, edit, or updatekeys.",
+				"Ensure the configured SOPS binary is executable before running add, edit, updatekeys, clone, set, unset, generate, or import.",
 			},
 		})
 		return false
